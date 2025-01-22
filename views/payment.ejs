@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Razorpay Payment</title>
+</head>
+<body>
+  <h1>Pay for Pad Access</h1>
+  <form action="/verify-payment" method="POST">
+    <script
+      src="https://checkout.razorpay.com/v1/checkout.js"
+      data-key="<%= razorpayKey %>"   
+      data-amount="60"               
+      data-currency="INR"
+      data-order_id="<%= orderId %>"  
+      data-buttontext="Pay 6 INR"
+      data-name="Test Payment"
+      data-description="Test payment of 6 INR"
+      data-theme.color="#F37254">
+    </script>
+    <!-- Corrected hidden input field -->
+    <input type="hidden" name="hidden">
+  </form>
+</body>
+</html>
