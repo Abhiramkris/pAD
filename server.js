@@ -19,7 +19,7 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // In-memory storage
-let padCount = 10;
+let padCount = 1;
 let paymentStatus = "ready";
 let systemStatus = "online";
 
