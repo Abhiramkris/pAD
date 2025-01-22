@@ -3,24 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Razorpay Payment</title>
+  <title>Pad Payment</title>
+  <style>
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      text-align: center;
+    }
+    .pad-count {
+      margin: 20px 0;
+      font-size: 1.2em;
+    }
+  </style>
 </head>
 <body>
-  <h1>Pay for Pad Access</h1>
-  <form action="/verify-payment" method="POST">
-    <script
-      src="https://checkout.razorpay.com/v1/checkout.js"
-      data-key="<%= razorpayKey %>"   
-      data-amount="60"               
-      data-currency="INR"
-      data-order_id="<%= orderId %>"  
-      data-buttontext="Pay 6 INR"
-      data-name="Test Payment"
-      data-description="Test payment of 6 INR"
-      data-theme.color="#F37254">
-    </script>
-    <!-- Corrected hidden input field -->
-    <input type="hidden" name="hidden">
-  </form>
+  <div class="container">
+    <h1>Pay for Pad Access</h1>
+    <div class="pad-count">
+      Pads Available: <%= padCount %>
+    </div>
+    <% if (padCount > 0) { %>
+      <form action="/verify-payment" method="POST">
+        <script
+          src="https://checkout.razorpay.com/v1/checkout.js"
+          data-key="<%= razorpayKey %>"
+          data-amount="60"
+          data-currency="INR"
+          data-order_id="<%= orderId %>"
+          data-buttontext="Pay 6 INR"
+          data-name="Pad Access"
+          data-description="Payment for pad access"
+          data-theme.color="#F37254">
+        </script>
+        <input type="hidden" name="hidden">
+      </form>
+    <% } else { %>
+      <p>Sorry, no pads available at the moment.</p>
+    <% } %>
+  </div>
 </body>
 </html>
