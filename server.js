@@ -61,7 +61,7 @@ app.get('/pad-count', (req, res) => {
   });
 });
 
-app.get('/payment', (req, res) => {
+app.get('/', (req, res) => {
   if (padCount < 1) {
     return res.render('error', { message: 'No pads available' });
   }
