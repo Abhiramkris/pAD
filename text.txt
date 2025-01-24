@@ -1,0 +1,216 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <LiquidCrystal_I2C.h>
+#include <mbedtls/sha256.h>
+
+// WiFi and Server Configuration
+const char* SSID = "YOUR_WIFI_SSID";
+const char* PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* SERVER_URL = "http://YOUR_SERVER_IP";
+const char* DEVICE_ID = "ESP32_DEVICE_ID";
+
+// Pin Definitions
+#define MOTOR_ENA 5
+#define MOTOR_IN1 18
+#define MOTOR_IN2 19
+#define HALL_SENSOR_PIN 21
+#define IR_SENSOR_PIN 22
+#define RED_LED_PIN 25
+#define GREEN_LED_PIN 26
+#define BUZZER_PIN 27
+
+// LCD Display
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Sensor Check Parameters
+const int HALL_TRIGGER_THRESHOLD = 3;
+const unsigned long MOTOR_TIMEOUT = 10000;  // 10 seconds
+const unsigned long HALL_SENSOR_CHECK = 3000; // 3 seconds
+
+// System State Structure
+struct SystemState {
+  int padCount;
+  String paymentStatus;
+  String systemStatus;
+  bool dispensing;
+  String authToken;
+} state;
+
+// Motor Control Variables
+volatile bool hallSensorTriggered = false;
+unsigned long motorStartTime = 0;
+
+class SensorValidator {
+private:
+  volatile int hallTriggerCount = 0;
+  volatile bool irSensorTriggered = false;
+
+public:
+  void resetValidation() {
+    hallTriggerCount = 0;
+    irSensorTriggered = false;
+    motorStartTime = millis();
+  }
+
+  void hallSensorCheck() {
+    hallTriggerCount++;
+  }
+
+  void irSensorCheck() {
+    irSensorTriggered = (digitalRead(IR_SENSOR_PIN) == LOW);
+  }
+
+  bool validateSensorTriggers() {
+    bool hallSensorValid = (hallTriggerCount >= HALL_TRIGGER_THRESHOLD);
+    bool motorTimeoutValid = (millis() - motorStartTime < MOTOR_TIMEOUT);
+    bool irSensorValid = irSensorTriggered;
+
+    return hallSensorValid && motorTimeoutValid && irSensorValid;
+  }
+
+  void triggerRefund() {
+    HTTPClient http;
+    String url = String(SERVER_URL) + "/refund";
+
+    JsonDocument doc;
+    doc["deviceId"] = DEVICE_ID;
+    doc["token"] = generateAuthToken(DEVICE_ID);
+    doc["refundReason"] = "Sensor validation failed";
+
+    String payload;
+    serializeJson(doc, payload);
+
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.POST(payload);
+    http.end();
+  }
+};
+
+// Authentication Token Generator
+String generateAuthToken(const char* deviceId) {
+  byte shaResult[32];
+  mbedtls_sha256_context ctx;
+  mbedtls_sha256_init(&ctx);
+  mbedtls_sha256_starts(&ctx, 0);
+  mbedtls_sha256_update(&ctx, (const unsigned char*)deviceId, strlen(deviceId));
+  mbedtls_sha256_finish(&ctx, shaResult);
+
+  String token = "";
+  for (int i = 0; i < 32; i++) {
+    char hex[3];
+    sprintf(hex, "%02x", shaResult[i]);
+    token += hex;
+  }
+  return token;
+}
+
+// Hall Sensor Interrupt
+void IRAM_ATTR hallSensorISR() {
+  hallSensorTriggered = true;
+}
+
+void fetchSystemStatus() {
+  HTTPClient http;
+  String url = String(SERVER_URL) + "/display";
+
+  http.begin(url);
+  int httpCode = http.GET();
+
+  if (httpCode == 200) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, http.getString());
+
+    if (!error) {
+      state.padCount = doc["padCount"];
+      state.paymentStatus = doc["paymentStatus"].as<String>();
+      state.systemStatus = doc["systemStatus"].as<String>();
+      state.authToken = doc["authToken"].as<String>();
+      state.dispensing = doc["dispensing"];
+    }
+  }
+
+  http.end();
+}
+
+SensorValidator sensorValidator;
+
+void controlMotor() {
+  // Reset sensor validation before motor start
+  sensorValidator.resetValidation();
+
+  // Start motor
+  digitalWrite(MOTOR_IN1, HIGH);
+  digitalWrite(MOTOR_IN2, LOW);
+  analogWrite(MOTOR_ENA, 128);
+  digitalWrite(GREEN_LED_PIN, HIGH);
+
+  // Continuous sensor checking during motor run
+  while (!sensorValidator.validateSensorTriggers()) {
+    sensorValidator.irSensorCheck();
+    delay(100);
+  }
+
+  // Stop motor if validation fails
+  if (!sensorValidator.validateSensorTriggers()) {
+    analogWrite(MOTOR_ENA, 0);
+    digitalWrite(MOTOR_IN1, LOW);
+    digitalWrite(MOTOR_IN2, LOW);
+
+    // Trigger refund
+    sensorValidator.triggerRefund();
+  }
+
+  // Stop motor after validation passes
+  analogWrite(MOTOR_ENA, 0);
+  digitalWrite(MOTOR_IN1, LOW);
+  digitalWrite(MOTOR_IN2, LOW);
+  digitalWrite(GREEN_LED_PIN, LOW);
+}
+
+void setup() {
+  // Hardware Initialization
+  pinMode(MOTOR_ENA, OUTPUT);
+  pinMode(MOTOR_IN1, OUTPUT);
+  pinMode(MOTOR_IN2, OUTPUT);
+  pinMode(HALL_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(IR_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(RED_LED_PIN, OUTPUT);
+  pinMode(GREEN_LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  // LCD Initialize
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+
+  // WiFi Connection
+  WiFi.begin(SSID, PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    lcd.print(".");
+  }
+
+  // Interrupt Setup
+  attachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN), hallSensorISR, FALLING);
+}
+
+void loop() {
+  // Fetch System Status
+  fetchSystemStatus();
+
+  // Display Status on LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Pads: " + String(state.padCount));
+  lcd.setCursor(0, 1);
+  lcd.print(state.paymentStatus);
+
+  // Motor Control
+  if (state.dispensing) {
+    controlMotor();
+  }
+
+  delay(1000);
+}

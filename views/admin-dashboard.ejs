@@ -1,0 +1,37 @@
+-<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard</title>
+</head>
+<body>
+  <h1>Admin Dashboard</h1>
+  
+  <h2>System Status</h2>
+  <p>Pad Count: <%= systemState.padCount %></p>
+  <p>Payment Status: <%= systemState.paymentStatus %></p>
+  
+  <h2>Transaction History</h2>
+  <table>
+    <tr>
+      <th>Order ID</th>
+      <th>Payment ID</th>
+      <th>Amount</th>
+      <th>Status</th>
+      <th>Pad Count</th>
+      <th>Created At</th>
+    </tr>
+    <% transactions.forEach(transaction => { %>
+      <tr>
+        <td><%= transaction.order_id %></td>
+        <td><%= transaction.payment_id %></td>
+        <td><%= transaction.amount %></td>
+        <td><%= transaction.status %></td>
+        <td><%= transaction.pad_count %></td>
+        <td><%= transaction.created_at %></td>
+      </tr>
+    <% }) %>
+  </table>
+</body>
+</html>
