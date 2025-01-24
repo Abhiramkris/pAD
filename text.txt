@@ -5,10 +5,10 @@
 #include <mbedtls/sha256.h>
 
 // WiFi and Server Configuration
-const char* SSID = "YOUR_WIFI_SSID";
-const char* PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* SERVER_URL = "http://YOUR_SERVER_IP";
-const char* DEVICE_ID = "ESP32_DEVICE_ID";
+const char* SSID = "asdf";
+const char* PASSWORD = "";
+const char* SERVER_URL = "https://pad-ew3v.onrender.com";  // Replace with your server URL
+const char* DEVICE_ID = "ESP32pad";
 
 // Pin Definitions
 #define MOTOR_ENA 5
@@ -41,6 +41,26 @@ struct SystemState {
 volatile bool hallSensorTriggered = false;
 unsigned long motorStartTime = 0;
 
+
+  void triggerRefund() {
+    HTTPClient http;
+    String url = String(SERVER_URL) + "/refund";
+
+    JsonDocument doc;
+    doc["deviceId"] = DEVICE_ID;
+    doc["token"] = generateAuthToken(DEVICE_ID);
+    doc["refundReason"] = "Sensor validation failed";
+
+    String payload;
+    serializeJson(doc, payload);
+
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.POST(payload);
+    http.end();
+  }
+};
+
 class SensorValidator {
 private:
   volatile int hallTriggerCount = 0;
@@ -69,24 +89,6 @@ public:
     return hallSensorValid && motorTimeoutValid && irSensorValid;
   }
 
-  void triggerRefund() {
-    HTTPClient http;
-    String url = String(SERVER_URL) + "/refund";
-
-    JsonDocument doc;
-    doc["deviceId"] = DEVICE_ID;
-    doc["token"] = generateAuthToken(DEVICE_ID);
-    doc["refundReason"] = "Sensor validation failed";
-
-    String payload;
-    serializeJson(doc, payload);
-
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.POST(payload);
-    http.end();
-  }
-};
 
 // Authentication Token Generator
 String generateAuthToken(const char* deviceId) {
