@@ -2,13 +2,14 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <LiquidCrystal_I2C.h>
-#include <mbedtls/sha256.h>
 
 // WiFi and Server Configuration
 const char* SSID = "asdf";
 const char* PASSWORD = "";
-const char* SERVER_URL = "https://pad-ew3v.onrender.com";  // Replace with your server URL
-const char* DEVICE_ID = "ESP32pad";
+const char* SERVER_URL = "https://pad-ew3v.onrender.com"; // Your server URL
+
+// LCD Display
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // Pin Definitions
 #define MOTOR_ENA 5
@@ -16,203 +17,206 @@ const char* DEVICE_ID = "ESP32pad";
 #define MOTOR_IN2 19
 #define HALL_SENSOR_PIN 21
 #define IR_SENSOR_PIN 22
-#define RED_LED_PIN 25
-#define GREEN_LED_PIN 26
-#define BUZZER_PIN 27
 
-// LCD Display
-LiquidCrystal_I2C lcd(0x27, 16, 2);
-
-// Sensor Check Parameters
-const int HALL_TRIGGER_THRESHOLD = 3;
-const unsigned long MOTOR_TIMEOUT = 10000;  // 10 seconds
-const unsigned long HALL_SENSOR_CHECK = 3000; // 3 seconds
-
-// System State Structure
+// System State
 struct SystemState {
   int padCount;
   String paymentStatus;
   String systemStatus;
   bool dispensing;
-  String authToken;
 } state;
 
 // Motor Control Variables
-volatile bool hallSensorTriggered = false;
-unsigned long motorStartTime = 0;
-
-
-  void triggerRefund() {
-    HTTPClient http;
-    String url = String(SERVER_URL) + "/refund";
-
-    JsonDocument doc;
-    doc["deviceId"] = DEVICE_ID;
-    doc["token"] = generateAuthToken(DEVICE_ID);
-    doc["refundReason"] = "Sensor validation failed";
-
-    String payload;
-    serializeJson(doc, payload);
-
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.POST(payload);
-    http.end();
-  }
-};
-
-class SensorValidator {
-private:
-  volatile int hallTriggerCount = 0;
-  volatile bool irSensorTriggered = false;
-
-public:
-  void resetValidation() {
-    hallTriggerCount = 0;
-    irSensorTriggered = false;
-    motorStartTime = millis();
-  }
-
-  void hallSensorCheck() {
-    hallTriggerCount++;
-  }
-
-  void irSensorCheck() {
-    irSensorTriggered = (digitalRead(IR_SENSOR_PIN) == LOW);
-  }
-
-  bool validateSensorTriggers() {
-    bool hallSensorValid = (hallTriggerCount >= HALL_TRIGGER_THRESHOLD);
-    bool motorTimeoutValid = (millis() - motorStartTime < MOTOR_TIMEOUT);
-    bool irSensorValid = irSensorTriggered;
-
-    return hallSensorValid && motorTimeoutValid && irSensorValid;
-  }
-
-
-// Authentication Token Generator
-String generateAuthToken(const char* deviceId) {
-  byte shaResult[32];
-  mbedtls_sha256_context ctx;
-  mbedtls_sha256_init(&ctx);
-  mbedtls_sha256_starts(&ctx, 0);
-  mbedtls_sha256_update(&ctx, (const unsigned char*)deviceId, strlen(deviceId));
-  mbedtls_sha256_finish(&ctx, shaResult);
-
-  String token = "";
-  for (int i = 0; i < 32; i++) {
-    char hex[3];
-    sprintf(hex, "%02x", shaResult[i]);
-    token += hex;
-  }
-  return token;
-}
+volatile int hallTriggerCount = 0;
+volatile bool irSensorTriggered = false;
+unsigned long irSensorLastTriggered = 0;
+unsigned long startTime = 0;
 
 // Hall Sensor Interrupt
 void IRAM_ATTR hallSensorISR() {
-  hallSensorTriggered = true;
+  hallTriggerCount++;
 }
 
+// Fetch System Status from Server
 void fetchSystemStatus() {
   HTTPClient http;
-  String url = String(SERVER_URL) + "/display";
+  String url = String(SERVER_URL) + "/check";
 
   http.begin(url);
   int httpCode = http.GET();
 
   if (httpCode == 200) {
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, http.getString());
-
+    String payload = http.getString();
+    DynamicJsonDocument doc(1024);
+    DeserializationError error = deserializeJson(doc, payload);
     if (!error) {
       state.padCount = doc["padCount"];
       state.paymentStatus = doc["paymentStatus"].as<String>();
       state.systemStatus = doc["systemStatus"].as<String>();
-      state.authToken = doc["authToken"].as<String>();
       state.dispensing = doc["dispensing"];
     }
+  } else {
+    Serial.println("Error fetching system status");
   }
 
   http.end();
 }
 
-SensorValidator sensorValidator;
-
-void controlMotor() {
-  // Reset sensor validation before motor start
-  sensorValidator.resetValidation();
+// Motor Control
+void startMotor() {
+  Serial.println("Starting motor...");
+  Serial.printf("Hall Sensor Count: %d, IR Sensor Triggered: %s\n", 
+                hallTriggerCount, 
+                digitalRead(IR_SENSOR_PIN) == LOW ? "YES" : "NO");
 
   // Start motor
   digitalWrite(MOTOR_IN1, HIGH);
   digitalWrite(MOTOR_IN2, LOW);
   analogWrite(MOTOR_ENA, 128);
-  digitalWrite(GREEN_LED_PIN, HIGH);
 
-  // Continuous sensor checking during motor run
-  while (!sensorValidator.validateSensorTriggers()) {
-    sensorValidator.irSensorCheck();
-    delay(100);
-  }
+  // Wait 3 seconds for the motor to dispense
+  delay(3000);
 
-  // Stop motor if validation fails
-  if (!sensorValidator.validateSensorTriggers()) {
-    analogWrite(MOTOR_ENA, 0);
-    digitalWrite(MOTOR_IN1, LOW);
-    digitalWrite(MOTOR_IN2, LOW);
-
-    // Trigger refund
-    sensorValidator.triggerRefund();
-  }
-
-  // Stop motor after validation passes
+  // Stop motor
   analogWrite(MOTOR_ENA, 0);
   digitalWrite(MOTOR_IN1, LOW);
   digitalWrite(MOTOR_IN2, LOW);
-  digitalWrite(GREEN_LED_PIN, LOW);
+
+  Serial.println("Motor stopped.");
+}
+
+// Update Pad Count (After IR Sensor Trigger)
+void updatePadCount() {
+  HTTPClient http;
+  String url = String(SERVER_URL) + "/update-pad-count";
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonBody = "{\"padCount\": " + String(state.padCount) + "}";
+  int httpCode = http.POST(jsonBody);
+
+  if (httpCode == 200) {
+    String payload = http.getString();
+    DynamicJsonDocument doc(1024);
+    DeserializationError error = deserializeJson(doc, payload);
+    if (!error) {
+      state.padCount = doc["padCount"];
+    }
+  } else {
+    Serial.println("Error updating pad count");
+  }
+
+  http.end();
+}
+
+// Refund Process
+void processRefund() {
+  Serial.println("Triggering refund...");
+
+  HTTPClient http;
+  String url = String(SERVER_URL) + "/refund";
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonBody = "{\"paymentId\": \"" + String(state.paymentStatus) + "\", \"reason\": \"Timeout or error\"}";
+  int httpCode = http.POST(jsonBody);
+
+  if (httpCode == 200) {
+    Serial.println("Refund processed successfully");
+    // Reset system after refund
+    state.dispensing = false;
+    hallTriggerCount = 0;
+    irSensorTriggered = false;
+  } else {
+    Serial.println("Error processing refund");
+  }
+
+  http.end();
 }
 
 void setup() {
-  // Hardware Initialization
+  Serial.begin(115200);
+  WiFi.begin(SSID, PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+
   pinMode(MOTOR_ENA, OUTPUT);
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
   pinMode(HALL_SENSOR_PIN, INPUT_PULLUP);
   pinMode(IR_SENSOR_PIN, INPUT_PULLUP);
-  pinMode(RED_LED_PIN, OUTPUT);
-  pinMode(GREEN_LED_PIN, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
 
-  // LCD Initialize
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
+  // Fetch System Status from Server initially
+  fetchSystemStatus();
 
-  // WiFi Connection
-  WiFi.begin(SSID, PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    lcd.print(".");
+  // If payment is successful, log the status and process motor
+  if (state.paymentStatus == "success") {
+    Serial.println("Payment success");
+    Serial.println("Waiting for item to dispense...");
+    startMotor();  // Start motor if payment is successful
+    startTime = millis();  // Record the time when motor starts
+  } else if (state.paymentStatus == "failed") {
+    Serial.println("Payment failed, triggering refund...");
+    processRefund();  // Trigger refund if payment failed
   }
 
-  // Interrupt Setup
+  // Interrupt for Hall Sensor
   attachInterrupt(digitalPinToInterrupt(HALL_SENSOR_PIN), hallSensorISR, FALLING);
+  delay(2000);
 }
 
 void loop() {
-  // Fetch System Status
+  // Continuously fetch System Status and update the display
   fetchSystemStatus();
 
-  // Display Status on LCD
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Pads: " + String(state.padCount));
-  lcd.setCursor(0, 1);
-  lcd.print(state.paymentStatus);
-
-  // Motor Control
-  if (state.dispensing) {
-    controlMotor();
+  // Log Payment and Dispensing Status
+  if (state.paymentStatus == "processing") {
+    Serial.println("Payment processing...");
   }
 
-  delay(1000);
+  if (state.paymentStatus == "failed") {
+    Serial.println("Payment failed!");
+    // Here, we would trigger a refund if needed
+  }
+
+  if (state.dispensing) {
+    Serial.println("Dispensing in progress...");
+    Serial.printf("Hall Sensor Count: %d, IR Sensor Triggered: %s\n", 
+                  hallTriggerCount, 
+                  digitalRead(IR_SENSOR_PIN) == LOW ? "YES" : "NO");
+
+    // Check IR sensor timeout (10 seconds)
+    if (millis() - startTime > 10000 && hallTriggerCount == 0) {
+      Serial.println("IR sensor timeout, initiating refund...");
+      processRefund();  // Trigger refund if IR sensor is not triggered in 10 seconds and Hall sensor count is 0
+    }
+
+    // If Hall sensor count reaches 3, initiate refund
+    if (hallTriggerCount >= 3) {
+      Serial.println("Hall sensor count reached 3, initiating refund...");
+      processRefund();
+    }
+
+    if (irSensorTriggered) {
+      irSensorTriggered = false; // Reset the interrupt trigger flag
+      Serial.println("IR sensor triggered. Updating pad count...");
+      updatePadCount();
+      Serial.println("Pad count updated.");
+      delay(2000);  // Simulate waiting for item to dispense
+    }
+  } else {
+    Serial.println("System is idle.");
+  }
+
+  // If dispensing has finished, stop motor and log it
+  if (!state.dispensing) {
+    Serial.println("Motor stopped.");
+  }
+
+  delay(1000);  // Polling delay
 }
+

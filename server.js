@@ -3,6 +3,7 @@ const path = require('path');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const axios = require('axios'); 
 require('dotenv').config();
 
 const app = express();
@@ -39,8 +40,27 @@ let systemState = {
 app.get('/', (req, res) => {
   res.redirect('/payment');
 });
-app.get('/admin', (req, res) => {
-  res.render('admin_dashboard');
+
+app.get('/admin', async (req, res) => {
+  try {
+    // Fetch system state from the /display endpoint
+    const response = await axios.get('https://pad-ew3v.onrender.com/display');  // Update with your server URL if necessary
+
+    // systemState from the response
+    const systemState = response.data;
+
+    // Example transactions (fetch or generate as needed)
+    const transactions = [
+      { order_id: '1', payment_id: '1001', amount: 600, status: 'success', pad_count: systemState.padCount, created_at: '2025-01-01' },
+      // Add more transactions here
+    ];
+
+    // Render the admin dashboard with systemState and transactions
+    res.render('admin_dashboard', { systemState, transactions });
+  } catch (error) {
+    console.error('Error fetching system state:', error);
+    res.status(500).send('Error fetching system state');
+  }
 });
 
 app.get('/reset', (req, res) => {
@@ -49,6 +69,16 @@ app.get('/reset', (req, res) => {
     paymentStatus: systemState.paymentStatus,
     dispensing: systemState.dispensing 
   });
+});
+
+app.get('/payment-failed', (req, res) => {
+  res.render('payment-failed', { message: 'Payment failed, please try again.' });
+});
+
+
+// Waiting Page (During Dispensing)
+app.get('/waiting', (req, res) => {
+  res.render('waiting', { message: 'System is currently dispensing. Please wait.' });
 });
 
 app.get('/display', (req, res) => {
@@ -150,11 +180,17 @@ app.post('/refund', (req, res) => {
 
 // Check System Status
 app.get('/check', (req, res) => {
-  res.json({
-    padCount: systemState.padCount,
-    paymentStatus: systemState.paymentStatus,
-    dispensing: systemState.dispensing,
-  });
+  if (systemState.dispensing) {
+    // If dispensing is in progress, redirect to a waiting page
+    res.redirect('/waiting');  // Redirects to the waiting page
+  } else {
+    // Otherwise, return the system status
+    res.json({
+      padCount: systemState.padCount,
+      paymentStatus: systemState.paymentStatus,
+      dispensing: systemState.dispensing,
+    });
+  }
 });
 
 // Update Pad Count (Admin)
