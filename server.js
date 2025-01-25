@@ -39,6 +39,14 @@ let systemState = {
 app.get('/', (req, res) => {
   res.redirect('/payment');
 });
+app.get('/display', (req, res) => {
+  res.json({
+    padCount: systemState.padCount,
+    paymentStatus: systemState.paymentStatus,
+    systemStatus: systemState.padCount > 0 ? 'active' : 'inactive',
+    dispensing: systemState.dispensing,
+  });
+});
 
 // Payment Page
 app.get('/payment', (req, res) => {
