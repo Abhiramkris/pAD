@@ -2,7 +2,6 @@ const express = require('express');
 const path = require('path');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
-const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
@@ -10,81 +9,51 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
-app.use(express.static(path.join(__dirname, 'public')));
+app.set('views', path.join(__dirname, 'views'));
 
-// MongoDB Schema for Transactions
-const TransactionSchema = new mongoose.Schema({
-  order_id: String,
-  payment_id: String,
-  amount: Number,
-  status: String,
-  pad_count: Number,
-  created_at: { type: Date, default: Date.now }
+// Razorpay Setup
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
-const Transaction = mongoose.model('Transaction', TransactionSchema);
 
 // Email Transporter
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
+    pass: process.env.EMAIL_PASS,
+  },
 });
 
-// Razorpay and Authentication Setup
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
-});
-
-// System State Management
+// System State
 let systemState = {
-  padCount: 10,
-  paymentStatus: 'ready',
-  systemStatus: 'online',
-  dispensing: false,
+  padCount: 10, // Initial pad count stored in memory
   currentOrderId: null,
   currentPaymentId: null,
-  authToken: null
+  paymentStatus: 'ready',
+  dispensing: false,
 };
 
-// Authentication Generator
-function generateAuthToken(deviceId) {
-  return crypto
-    .createHmac('sha256', process.env.AUTH_SECRET)
-    .update(deviceId)
-    .digest('hex');
-}
-
-// Email Notification Function
-async function sendEmail(subject, body) {
-  try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.ALERT_RECIPIENT,
-      subject,
-      text: body
-    });
-  } catch (error) {
-    console.error('Email sending failed:', error);
-  }
-}
-
-// Routes
+// Home Route
 app.get('/', (req, res) => {
+  res.redirect('/payment');
+});
+
+// Payment Page
+app.get('/payment', (req, res) => {
   res.render('payment', { 
-    key_id: process.env.RAZORPAY_KEY_ID,
-    amount: 100
+    padCount: systemState.padCount, 
+    key_id: process.env.RAZORPAY_KEY_ID 
   });
 });
 
 // Create Razorpay Order
 app.post('/create-order', async (req, res) => {
   const options = {
-    amount: 100,
+    amount: 100, // Amount in paisa (₹1.00)
     currency: 'INR',
-    receipt: `order_${Date.now()}`
+    receipt: `order_${Date.now()}`,
   };
 
   try {
@@ -92,12 +61,13 @@ app.post('/create-order', async (req, res) => {
     systemState.currentOrderId = order.id;
     res.json(order);
   } catch (error) {
+    console.error('Error creating order:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Payment Verification
-app.post('/verify-payment', async (req, res) => {
+// Verify Payment
+app.post('/verify-payment', (req, res) => {
   const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
 
   const generated_signature = crypto
@@ -106,94 +76,78 @@ app.post('/verify-payment', async (req, res) => {
     .digest('hex');
 
   if (generated_signature === razorpay_signature) {
-    const transaction = new Transaction({
-      order_id: razorpay_order_id,
-      payment_id: razorpay_payment_id,
-      amount: 100,
-      status: 'success',
-      pad_count: systemState.padCount
-    });
-    await transaction.save();
-
-    systemState.paymentStatus = 'dispensing';
-    systemState.dispensing = true;
+    systemState.paymentStatus = 'success';
+    systemState.padCount = Math.max(0, systemState.padCount - 1); // Deduct pad count
     systemState.currentPaymentId = razorpay_payment_id;
+    systemState.dispensing = true;
 
-    res.json({ status: 'success' });
+    // Send Email Notification
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: process.env.NOTIFICATION_EMAIL,
+      subject: 'Pad Dispensed',
+      text: `A pad was dispensed successfully. Remaining pads: ${systemState.padCount}`,
+    };
+
+    transporter.sendMail(mailOptions, (err, info) => {
+      if (err) console.error('Error sending email:', err);
+      else console.log('Email sent:', info.response);
+    });
+
+    res.json({ status: 'success', padCount: systemState.padCount });
   } else {
     res.status(400).json({ status: 'failed' });
   }
 });
 
-// Motor Status and Refund Endpoint
-app.post('/motor-status', async (req, res) => {
-  const { deviceId, token, hallSensorTriggered } = req.body;
+// Refund System (if dispensing fails)
+app.post('/refund', (req, res) => {
+  const { paymentId, reason } = req.body;
 
-  if (token !== generateAuthToken(deviceId)) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
+  if (paymentId) {
+    // Refund logic (mocked for simplicity)
+    systemState.paymentStatus = 'refunded';
+    console.log(`Refund processed for Payment ID: ${paymentId}, Reason: ${reason}`);
 
-  if (!hallSensorTriggered) {
-    await sendEmail(
-      'Motor Malfunction Alert', 
-      'Hall effect sensor not triggered. Motor may be non-functional.'
-    );
+    // Email Notification for Refund
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: process.env.NOTIFICATION_EMAIL,
+      subject: 'Refund Issued',
+      text: `A refund was issued for Payment ID: ${paymentId}. Reason: ${reason}`,
+    };
 
-    try {
-      await razorpay.payments.refund(systemState.currentPaymentId, {
-        amount: 100,
-        speed: 'normal'
-      });
+    transporter.sendMail(mailOptions, (err, info) => {
+      if (err) console.error('Error sending refund email:', err);
+      else console.log('Refund email sent:', info.response);
+    });
 
-      systemState.paymentStatus = 'refunded';
-      systemState.dispensing = false;
-
-      res.json({ 
-        status: 'refund_triggered', 
-        reason: 'Motor malfunction' 
-      });
-    } catch (error) {
-      res.status(500).json({ error: 'Refund failed' });
-    }
+    res.json({ success: true, message: 'Refund issued successfully' });
   } else {
-    res.json({ status: 'motor_functional' });
+    res.status(400).json({ error: 'Invalid Payment ID' });
   }
 });
 
-// System Status Endpoint
-app.get('/display', (req, res) => {
-  const deviceId = process.env.ESP32_DEVICE_ID;
-  systemState.authToken = generateAuthToken(deviceId);
-
-  // Low pad count check
-  if (systemState.padCount < 5) {
-    sendEmail(
-      'Low Pad Count Alert', 
-      `Pad count is critically low: ${systemState.padCount} pads remaining.`
-    );
-  }
-
+// Check System Status
+app.get('/check', (req, res) => {
   res.json({
-    ...systemState,
-    authToken: systemState.authToken
+    padCount: systemState.padCount,
+    paymentStatus: systemState.paymentStatus,
+    dispensing: systemState.dispensing,
   });
 });
 
-// Pad Count Update
+// Update Pad Count (Admin)
 app.post('/update-pad-count', (req, res) => {
-  const { count, deviceId, token } = req.body;
-
-  if (token !== generateAuthToken(deviceId)) {
-    return res.status(403).json({ error: 'Unauthorized' });
+  const { count } = req.body;
+  if (typeof count === 'number' && count >= 0) {
+    systemState.padCount = count;
+    res.json({ success: true, padCount: systemState.padCount });
+  } else {
+    res.status(400).json({ error: 'Invalid pad count value' });
   }
-
-  systemState.padCount = count >= 0 ? count : systemState.padCount;
-  
-  res.json({ 
-    success: true, 
-    padCount: systemState.padCount 
-  });
 });
 
+// Start Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
