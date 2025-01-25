@@ -40,11 +40,15 @@ app.get('/', (req, res) => {
   res.redirect('/payment');
 });
 app.get('/admin', (req, res) => {
-  res.redirect('/admin-dashboard');
+  res.render('admin_dashboard');
 });
 
 app.get('/reset', (req, res) => {
-  res.redirect('/admin');
+  res.render('admin', { 
+    padCount: systemState.padCount, 
+    paymentStatus: systemState.paymentStatus,
+    dispensing: systemState.dispensing 
+  });
 });
 
 app.get('/display', (req, res) => {
