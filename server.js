@@ -28,7 +28,7 @@ const transporter = nodemailer.createTransport({
 
 // System State
 let systemState = {
-  padCount: 10, // Initial pad count stored in memory
+  padCount: 20, // Initial pad count stored in memory
   currentOrderId: null,
   currentPaymentId: null,
   paymentStatus: 'ready',
@@ -59,7 +59,7 @@ app.get('/payment', (req, res) => {
 // Create Razorpay Order
 app.post('/create-order', async (req, res) => {
   const options = {
-    amount: 100, // Amount in paisa (₹1.00)
+    amount: 600, // Amount in paisa (₹1.00)
     currency: 'INR',
     receipt: `order_${Date.now()}`,
   };
@@ -155,6 +155,24 @@ app.post('/update-pad-count', (req, res) => {
     res.status(400).json({ error: 'Invalid pad count value' });
   }
 });
+// Reset Pad Count
+app.post('/reset-pad-count', (req, res) => {
+  systemState.padCount = 20; // Reset pad count to 20
+  res.json({ success: true, padCount: systemState.padCount });
+});
+
+// Reset Payment Status
+app.post('/reset-payment-status', (req, res) => {
+  systemState.paymentStatus = 'ready'; // Reset payment status to 'ready'
+  res.json({ success: true, paymentStatus: systemState.paymentStatus });
+});
+
+// Reset Dispensing Status
+app.post('/reset-dispensing', (req, res) => {
+  systemState.dispensing = false; // Reset dispensing status to false
+  res.json({ success: true, dispensing: systemState.dispensing });
+});
+
 
 // Start Server
 const PORT = process.env.PORT || 3000;
