@@ -39,6 +39,14 @@ let systemState = {
 app.get('/', (req, res) => {
   res.redirect('/payment');
 });
+app.get('/admin', (req, res) => {
+  res.redirect('/admin-dashboard');
+});
+
+app.get('/reset', (req, res) => {
+  res.redirect('/admin');
+});
+
 app.get('/display', (req, res) => {
   res.json({
     padCount: systemState.padCount,
