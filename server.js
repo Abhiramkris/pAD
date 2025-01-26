@@ -3,7 +3,6 @@ const path = require('path');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
@@ -31,9 +30,9 @@ let systemState = {
   padCount: 20, // Initial pad count stored in memory
   currentOrderId: null,
   currentPaymentId: null,
-  paymentStatus: 'ready', // Default to 'ready' when the server starts
-  dispensing: false,      // Ensure dispensing is false when the server starts
-  rotations: 0,           // Reset rotation count to 0
+  paymentStatus: 'ready',
+  dispensing: false,
+  rotations: 0,
 };
 
 // Middleware for Authentication (ESP32)
@@ -86,7 +85,6 @@ app.get('/display', (req, res) => {
   });
 });
 
-
 // Payment Page
 app.get('/payment', (req, res) => {
   res.render('payment', {
@@ -108,8 +106,7 @@ app.post('/create-order', async (req, res) => {
   }
 });
 
-
-// Verify Payment (No Pad Reduction)
+// Verify Payment
 app.post('/verify-payment', (req, res) => {
   const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
 
@@ -123,79 +120,51 @@ app.post('/verify-payment', (req, res) => {
     systemState.currentPaymentId = razorpay_payment_id;
     systemState.dispensing = true;
 
-    motorActivationRequested = true; // Set flag to indicate motor activation
-    res.json({ status: 'success' });  // No pad count reduction here
+    res.json({ status: 'success' });
   } else {
     res.status(400).json({ status: 'failed' });
   }
 });
 
+// Check Motor Status
 app.get('/check-motor', (req, res) => {
   const { authCode } = req.query;
 
-  // Validate authCode to ensure the request is authorized
   if (authCode !== process.env.AUTH_CODE) {
     return res.status(401).json({ status: 'unauthorized' });
   }
 
-  // Logic to determine if the motor should start
-  // You can customize this to fit your requirements (e.g., check if payment was successful or if dispensing is ready)
   if (systemState.paymentStatus === 'success' && !systemState.dispensing) {
-    res.json({ motor: 'start' }); // Motor can be activated
+    res.json({ motor: 'start' });
   } else {
-    res.json({ motor: 'stop' });  // Motor should not be activated
+    res.json({ motor: 'stop' });
   }
 });
 
-// Endpoint to handle IR sensor interrupt (update pad count)
+// IR Sensor Interrupt
 app.post('/sensor-interrupt', (req, res) => {
   const { sensorTriggered } = req.body;
 
   if (sensorTriggered && systemState.padCount > 0) {
-    // Reduce the pad count only when the sensor is triggered
     systemState.padCount = Math.max(0, systemState.padCount - 1);
-
-    // Send email notification for pad dispensing
-    // const mailOptions = {
-    //   from: process.env.EMAIL_USER,
-    //   to: process.env.NOTIFICATION_EMAIL,
-    //   subject: 'Pad Dispensed',
-    //   text: `Pad dispensed successfully. Remaining pads: ${systemState.padCount}`,
-    // };
-
-    // transporter.sendMail(mailOptions, (err, info) => {
-    //   if (err) console.error('Error sending email:', err);
-    //   else console.log('Email sent:', info.response);
-    // });
-
     res.json({ success: true, padCount: systemState.padCount });
   } else {
     res.status(400).json({ error: 'Invalid sensor data or no pads left' });
   }
 });
 
-
-
 // Refund System
 app.post('/refund', (req, res) => {
   const { paymentId, reason } = req.body;
 
-  // Check if paymentId is provided
   if (paymentId) {
-    // Check if the payment has already been refunded
     if (systemState.paymentStatus === 'refunded' && systemState.currentPaymentId === paymentId) {
-      // If payment status is 'refunded' and paymentId matches, reject multiple refunds
       return res.status(400).json({ error: 'Refund has already been processed for this payment.' });
     }
 
-    // If payment is not refunded yet, set payment status to 'refunded'
     systemState.paymentStatus = 'refunded';
-    systemState.currentPaymentId = paymentId; // Store the paymentId of the refunded payment
+    systemState.currentPaymentId = paymentId;
 
-    // Handle refund logic here (e.g., Razorpay refund)
-    // Example: razorpay.payments.refund(paymentId);
-
-    // Send the refund email notification
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: process.env.NOTIFICATION_EMAIL,
@@ -204,22 +173,17 @@ app.post('/refund', (req, res) => {
     };
 
     transporter.sendMail(mailOptions, (err, info) => {
-      if (err) {
-        console.error('Error sending refund email:', err);
-      } else {
-        console.log('Refund email sent:', info.response);
-      }
+      if (err) console.error('Error sending refund email:', err);
+      else console.log('Refund email sent:', info.response);
     });
 
-    // Respond with success
     res.json({ success: true, message: 'Refund issued successfully' });
   } else {
     res.status(400).json({ error: 'Invalid Payment ID' });
   }
 });
 
-
-// System Status Check
+// Check System Status
 app.get('/check', (req, res) => {
   const authCode = req.query.authCode;
 
@@ -246,16 +210,14 @@ app.post('/update-pad-count', (req, res) => {
   }
 });
 
-// Endpoint to handle system error (e.g., IR interrupt not happening)
+// System Error Notification
 app.post('/system-error', async (req, res) => {
   const { paymentId, reason } = req.body;
 
-  // Logic to handle system error and initiate refund process
   if (paymentId && reason === 'IR interrupt not detected') {
     systemState.paymentStatus = 'refunded';
-    systemState.systemStatus = 'inactive';  // Set system status to inactive
+    systemState.systemStatus = 'inactive';
 
-    // Logic to initiate the refund with Razorpay (example below, modify as needed)
     try {
       const refund = await razorpay.payments.refund(paymentId);
       const mailOptions = {
@@ -266,51 +228,20 @@ app.post('/system-error', async (req, res) => {
       };
 
       transporter.sendMail(mailOptions, (err, info) => {
-        if (err) {
-          console.error('Error sending refund email:', err);
-        } else {
-          console.log('Refund email sent:', info.response);
-        }
+        if (err) console.error('Error sending refund email:', err);
+        else console.log('Refund email sent:', info.response);
       });
 
-      res.json({ success: true, message: 'Refund issued due to system error' });
+      res.json({ success: true, message: 'Refund processed successfully' });
     } catch (error) {
       console.error('Error processing refund:', error);
-      res.status(500).json({ error: 'Error processing refund' });
+      res.status(500).json({ error: 'Refund processing failed' });
     }
   } else {
-    res.status(400).json({ error: 'Invalid payment ID or reason' });
+    res.status(400).json({ error: 'Invalid error details' });
   }
 });
 
-
-// Handle Dispensing with Hall Sensor
-app.post('/dispense', (req, res) => {
-  const { rotation } = req.body;
-  systemState.rotations += rotation;
-
-  if (systemState.rotations > 3) {
-    systemState.paymentStatus = 'error';
-    systemState.rotations = 0; // Reset rotation count
-
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.NOTIFICATION_EMAIL,
-      subject: 'System Error',
-      text: `Motor rotation exceeded limit. Check the system.`,
-    };
-
-    transporter.sendMail(mailOptions, (err, info) => {
-      if (err) console.error('Error sending email:', err);
-      else console.log('Error email sent:', info.response);
-    });
-
-    res.status(400).json({ error: 'Rotation limit exceeded', padCount: systemState.padCount });
-  } else {
-    res.json({ success: true, padCount: systemState.padCount });
-  }
-});
-
-// Server Start
+// Start Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
