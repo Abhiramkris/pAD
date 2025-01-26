@@ -85,6 +85,7 @@ app.get('/display', (req, res) => {
     return res.status(401).json({ status: 'unauthorized' });
   }
 
+  res.setHeader('Content-Type', 'application/json');
   res.json({
     padCount: systemState.padCount,
     paymentStatus: systemState.paymentStatus,
@@ -223,7 +224,7 @@ app.get('/check', (req, res) => {
   if (authCode !== process.env.AUTH_CODE) {
     return res.status(401).json({ status: 'unauthorized' });
   }
-
+res.setHeader('Content-Type', 'application/json');
   res.json({
     padCount: systemState.padCount,
     paymentStatus: systemState.paymentStatus,
