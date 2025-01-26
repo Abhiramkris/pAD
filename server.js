@@ -47,7 +47,7 @@ function authMiddleware(req, res, next) {
 
 // Home Route
 app.get('/', (req, res) => res.redirect('/payment'));
-app.get('/reset', (req, res) => res.redirect('/admin'));
+app.get('/reset', (req, res) => res.render('/admin'));
 // Admin Dashboard
 app.get('/admin', async (req, res) => {
   try {
