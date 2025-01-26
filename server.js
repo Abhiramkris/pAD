@@ -47,7 +47,7 @@ function authMiddleware(req, res, next) {
 
 // Home Route
 app.get('/', (req, res) => res.redirect('/payment'));
-
+app.get('/reset', (req, res) => res.redirect('/admin'));
 // Admin Dashboard
 app.get('/admin', async (req, res) => {
   try {
@@ -252,70 +252,12 @@ app.post('/system-error', async (req, res) => {
     systemState.systemStatus = 'inactive';
 
     try {
-      // Attempt to refund the payment in case of a system error
-      const refund = await razorpay.payments.refund(paymentId);
-      console.log('Refund successful:', refund);
-
-      // Send the error notification email
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: process.env.NOTIFICATION_EMAIL,
-        subject: 'Refund Issued for System Error',
-        text: `Refund issued for Payment ID: ${paymentId}. Reason: ${reason}. Refund Details: ${JSON.stringify(refund)}`,
-      };
-
-      transporter.sendMail(mailOptions, (err, info) => {
-        if (err) {
-          console.error('Error sending refund email:', err);
-        } else {
-          console.log('Refund email sent:', info.response);
-        }
-      });
-
-      // Respond with success
-      res.json({ success: true, message: 'Refund processed successfully due to system error' });
-    } catch (error) {
-      console.error('Error processing refund:', error);
-
-      // Send a notification about the failure in refund processing
-      const errorMailOptions = {
-        from: process.env.EMAIL_USER,
-        to: process.env.NOTIFICATION_EMAIL,
-        subject: 'System Error - Refund Failed',
-        text: `Failed to process refund for Payment ID: ${paymentId}. Reason: ${reason}. Error Details: ${error.message}`,
-      };
-
-      transporter.sendMail(errorMailOptions, (err, info) => {
-        if (err) {
-          console.error('Error sending failure notification:', err);
-        } else {
-          console.log('Failure notification sent:', info.response);
-        }
-      });
-
-      // Respond with error
-      res.status(500).json({ error: 'Refund processing failed due to system error', details: error.message });
-    }
-  } else {
-    res.status(400).json({ error: 'Invalid error details or missing paymentId' });
-  }
-});
-
-// System Error Notification
-app.post('/system-error', async (req, res) => {
-  const { paymentId, reason } = req.body;
-
-  if (paymentId && reason === 'IR interrupt not detected') {
-    systemState.paymentStatus = 'refunded';
-    systemState.systemStatus = 'inactive';
-
-    try {
       const refund = await razorpay.payments.refund(paymentId);
       const mailOptions = {
         from: process.env.EMAIL_USER,
         to: process.env.NOTIFICATION_EMAIL,
         subject: 'Refund Issued for System Error',
-        text: `Refund issued for Payment ID: ${paymentId}. Reason: IR interrupt not detected. Refund Details: ${refund}`,
+        text: `Refund issued for Payment ID: ${paymentId}. Reason: IR interrupt not detected. Refund Details: ${JSON.stringify(refund)}`,
       };
 
       transporter.sendMail(mailOptions, (err, info) => {
@@ -332,6 +274,10 @@ app.post('/system-error', async (req, res) => {
     res.status(400).json({ error: 'Invalid error details' });
   }
 });
+
+
+// System Error Notification
+
 
 // Start Server
 const PORT = process.env.PORT || 3000;
