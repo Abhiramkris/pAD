@@ -62,28 +62,22 @@ app.get('/admin', async (req, res) => {
 });
 
 app.post('/update-payment-status', (req, res) => {
-  // Get the payment status from the request body
   const { paymentStatus, authCode } = req.body;
-  
-  // Check if the authCode matches a predefined value for security purposes
-  const validAuthCode = 'your_secret_auth_code'; // Replace with your actual auth code
 
-  if (authCode !== validAuthCode) {
-      return res.status(401).json({ message: 'Unauthorized' });
+  // Verify the authCode (replace with your own logic)
+  if (authCode !== 'your_secret_auth_code') {
+    return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  // Check if paymentStatus is provided
-  if (!paymentStatus) {
-      return res.status(400).json({ message: 'Payment status is required' });
-  }
+  // Update the payment status in your database (replace with your own logic)
+  db.query('UPDATE payments SET status = ? WHERE paymentId = ?', [paymentStatus, paymentId], (err, result) => {
+    if (err) {
+      return res.status(500).json({ message: 'Database update failed' });
+    }
 
-  // Log the received payment status for debugging
-  console.log(`Received payment status: ${paymentStatus}`);
-
-  // Simulate updating the payment status in a database (or another system)
-  // Here, we just respond back with a success message
-
-  res.status(200).json({ message: 'Payment status updated successfully', status: paymentStatus });
+    // Respond with the updated status
+    res.status(200).json({ message: 'Payment status updated', paymentStatus });
+  });
 });
 
 // Display Endpoint (ESP32)
