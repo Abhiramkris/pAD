@@ -153,31 +153,47 @@ app.post('/sensor-interrupt', (req, res) => {
   }
 });
 
-// Refund System
-app.post('/refund', (req, res) => {
+// Refund System// Refund System
+app.post('/refund', async (req, res) => {
   const { paymentId, reason } = req.body;
 
   if (paymentId) {
+    // Check if payment has already been refunded
     if (systemState.paymentStatus === 'refunded' && systemState.currentPaymentId === paymentId) {
       return res.status(400).json({ error: 'Refund has already been processed for this payment.' });
     }
 
-    systemState.paymentStatus = 'refunded';
-    systemState.currentPaymentId = paymentId;
+    try {
+      // If payment is not refunded yet, set payment status to 'refunded'
+      systemState.paymentStatus = 'refunded';
+      systemState.currentPaymentId = paymentId; // Store the paymentId of the refunded payment
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.NOTIFICATION_EMAIL,
-      subject: 'Refund Issued',
-      text: `Refund issued for Payment ID: ${paymentId}. Reason: ${reason}`,
-    };
+      // Handle the Razorpay refund
+      const refund = await razorpay.payments.refund(paymentId);
+      console.log('Refund successful:', refund);
 
-    transporter.sendMail(mailOptions, (err, info) => {
-      if (err) console.error('Error sending refund email:', err);
-      else console.log('Refund email sent:', info.response);
-    });
+      // Send the refund email notification
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: process.env.NOTIFICATION_EMAIL,
+        subject: 'Refund Issued',
+        text: `Refund issued for Payment ID: ${paymentId}. Reason: ${reason}. Refund Details: ${JSON.stringify(refund)}`,
+      };
 
-    res.json({ success: true, message: 'Refund issued successfully' });
+      transporter.sendMail(mailOptions, (err, info) => {
+        if (err) {
+          console.error('Error sending refund email:', err);
+        } else {
+          console.log('Refund email sent:', info.response);
+        }
+      });
+
+      // Respond with success
+      res.json({ success: true, message: 'Refund issued successfully', refund });
+    } catch (error) {
+      console.error('Error processing refund:', error);
+      res.status(500).json({ error: 'Refund processing failed', details: error.message });
+    }
   } else {
     res.status(400).json({ error: 'Invalid Payment ID' });
   }
