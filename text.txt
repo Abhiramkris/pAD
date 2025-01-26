@@ -5,82 +5,72 @@
 #include <HTTPClient.h>
 
 // WiFi Credentials
-const char* ssid = "your_wifi_ssid";
-const char* password = "your_wifi_password";
+const char* ssid = "asdf";
+const char* password = "";
 
 // Server URL and Auth Code
-const char* checkURL = "http://your-server-url.com/check";
-const char* displayURL = "http://your-server-url.com/display";
+const char* checkURL = "https://pad-ew3v.onrender.com/check";
+const char* displayURL = "https://pad-ew3v.onrender.com/display";
+const char* refundURL = "https://pad-ew3v.onrender.com/refund";
+const char* updatePaymentStatusURL = "https://pad-ew3v.onrender.com/update-payment-status";
 const char* authCode = "your_secret_auth_code";
 
-// LED Pin
-const int ledPin = 2;                         // GPIO2 (onboard LED)
-const int motorPin = 12;                      // Example motor control pin
-const int irSensorPin = 14;                   // Example pin for the IR sensor
-unsigned long motorStartTime = 0;             // Variable to store motor start time
-const unsigned long timeoutDuration = 10000;  // 10 seconds timeout (in milliseconds)
-bool motorStarted = false;
-bool irInterruptDetected = false;  // Flag to track IR interrupt
+// Server IP
+const char* serverIP = "https://pad-ew3v.onrender.com";  // Replace with your actual server URL
 
+// LED Pin
+const int ledPin = 2;
+const int motorPin = 12;
+const int irSensorPin = 14;
+unsigned long motorStartTime = 0;
+const unsigned long timeoutDuration = 10000;
+bool motorStarted = false;
+bool irInterruptDetected = false;
 
 // OLED Display Configuration
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
+// Function Declarations
+void fetchCheckStatus();
+void fetchAndDisplayData();
+void sendSystemError();
+void startMotor();
+void updatePaymentStatus();
+void startRefundProcess();
+
+// Sensor Interrupt
 void IRAM_ATTR sensorInterrupt() {
-  // This function is called when the IR sensor detects a pad has been dispensed
+  irInterruptDetected = true;  // Set the flag when the IR sensor is triggered
   Serial.println("IR sensor triggered! Pad dispensed.");
-
-  // Send notification to Node.js server to reduce pad count
-  HTTPClient http;
-  String fullURL = String(serverIP) + "/sensor-interrupt";
-  http.begin(fullURL);
-  http.addHeader("Content-Type", "application/json");
-
-  String jsonPayload = "{\"sensorTriggered\": true}";
-  int httpResponseCode = http.POST(jsonPayload);
-
-  if (httpResponseCode == 200) {
-    String payload = http.getString();
-    Serial.println("Server response: " + payload);  // Log server response
-  } else {
-    Serial.println("Error sending sensor data: " + String(httpResponseCode));
-  }
-
-  http.end();
 }
 
 void startMotor() {
-  // Start the motor (implement your motor control logic here)
-  digitalWrite(motorPin, HIGH);  // Motor on
-  delay(5000);                   // Motor runs for 5 seconds (adjust as necessary)
-  digitalWrite(motorPin, LOW);   // Motor off
+  motorStarted = true;
+  motorStartTime = millis();  // Start the motor and record the time
+  digitalWrite(motorPin, HIGH);
+  Serial.println("Motor started.");
+  delay(5000);  // Run the motor for 5 seconds (adjust as needed)
+  digitalWrite(motorPin, LOW);
+  motorStarted = false;
+  Serial.println("Motor stopped.");
+  updatePaymentStatus();  // Update payment status when the motor stops
 }
 
-
 void setup() {
-  // Initialize Serial Monitor, LED Pin, and OLED Display
   Serial.begin(115200);
   pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, LOW);
-
-  Serial.begin(115200);
   pinMode(motorPin, OUTPUT);
-  pinMode(irSensorPin, INPUT_PULLUP);  // IR sensor pin setup
+  pinMode(irSensorPin, INPUT_PULLUP);
 
-  // Attach interrupt to the IR sensor pin
-  attachInterrupt(digitalPinToInterrupt(irSensorPin), sensorInterrupt, FALLING);  // Trigger on falling edge (adjust as necessary)
+  attachInterrupt(digitalPinToInterrupt(irSensorPin), sensorInterrupt, FALLING);
 
-
-  if (!display.begin(SSD1306_I2C_ADDRESS, 0x3C)) {
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("SSD1306 allocation failed!");
-    for (;;)
-      ;
+    for (;;);
   }
 
-
-  // Clear and display initial message
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -88,7 +78,6 @@ void setup() {
   display.println("Initializing...");
   display.display();
 
-  // Connect to WiFi
   WiFi.begin(ssid, password);
   display.println("Connecting to WiFi...");
   display.display();
@@ -104,49 +93,24 @@ void setup() {
 
 void loop() {
   if (WiFi.status() == WL_CONNECTED) {
-    // Check System Status and log to Serial Monitor
     fetchCheckStatus();
-
-    // Fetch and Display `/display` Data
     fetchAndDisplayData();
   } else {
     Serial.println("WiFi not connected!");
   }
-  HTTPClient http;
-  String fullURL = String(serverIP) + "/check-motor?authCode=" + authCode;
-  http.begin(fullURL);
 
-  int httpResponseCode = http.GET();
-  if (httpResponseCode == 200) {
-    String payload = http.getString();
-    Serial.println("Motor Status: " + payload);  // Log to Serial Monitor
+  delay(5000);  // Poll every 5 seconds
 
-    // Check if the response is to start the motor
-    if (payload.indexOf("\"motor\":\"start\"") > -1) {
-      Serial.println("Activating motor...");
-      startMotor();  // Start the motor
+  if (motorStarted) {
+    if (millis() - motorStartTime >= timeoutDuration) {
+      if (!irInterruptDetected) {
+        Serial.println("No IR interrupt detected. Starting refund process.");
+        startRefundProcess();  // Start refund if IR interrupt is not detected within timeout
+      }
+      motorStarted = false;
+      updatePaymentStatus();  // Update payment status when motor stops or timeout occurs
     }
-  } else {
-    Serial.println("Error fetching motor status: " + String(httpResponseCode));
   }
-
-  http.end();
-}
-else {
-  Serial.println("WiFi not connected!");
-}
-
-delay(5000);  // Poll every 5 seconds
-if (motorStarted) {
-  // Check if 10 seconds have passed since the motor was started
-  if (millis() - motorStartTime >= timeoutDuration) {
-    if (!irInterruptDetected) {
-      // If IR interrupt was not detected, send system error and refund
-      sendSystemError();
-    }
-    motorStarted = false;  // Reset motor start status
-  }
-}
 }
 
 void fetchCheckStatus() {
@@ -157,45 +121,15 @@ void fetchCheckStatus() {
   int httpResponseCode = http.GET();
   if (httpResponseCode == 200) {
     String payload = http.getString();
-    Serial.println("System Status from /check: " + payload);  // Log to Serial Monitor
-
-    // Check if system is active
+    Serial.println("System Status from /check: " + payload);
     if (payload.indexOf("\"systemStatus\":\"active\"") > -1) {
-      digitalWrite(ledPin, HIGH);  // Light up LED if system is active
+      digitalWrite(ledPin, HIGH);
     } else {
-      digitalWrite(ledPin, LOW);  // Turn off LED if system is inactive
+      digitalWrite(ledPin, LOW);
     }
-  } else if (httpResponseCode == 401) {
-    Serial.println("Unauthorized access to /check: Check your auth code.");
-    digitalWrite(ledPin, LOW);  // Turn off LED for unauthorized requests
   } else {
     Serial.println("Error fetching /check status: " + String(httpResponseCode));
     digitalWrite(ledPin, LOW);
-  }
-
-  http.end();
-}
-
-void irInterruptHandler() {
-  irInterruptDetected = true;  // Set flag to true if IR interrupt occurs
-}
-
-void sendSystemError() {
-  HTTPClient http;
-  String fullURL = String(serverIP) + "/system-error";  // Server URL to handle system error
-  http.begin(fullURL);
-  
-  // Add your payment ID and reason to the request body
-  String postData = "{\"paymentId\":\"" + String(systemState.currentPaymentId) + "\",\"reason\":\"IR interrupt not detected\"}";
-
-  http.addHeader("Content-Type", "application/json");
-  
-  int httpResponseCode = http.POST(postData);
-  
-  if (httpResponseCode == 200) {
-    Serial.println("System error reported to server and refund initiated.");
-  } else {
-    Serial.println("Failed to report system error to server.");
   }
 
   http.end();
@@ -209,44 +143,108 @@ void fetchAndDisplayData() {
   int httpResponseCode = http.GET();
   if (httpResponseCode == 200) {
     String payload = http.getString();
-    Serial.println("Display Data from /display: " + payload);  // Log to Serial Monitor
-
-    // Parse and Display Data (Simple JSON parsing for demonstration)
+    Serial.println("Display Data from /display: " + payload);
     display.clearDisplay();
     display.setCursor(0, 0);
-
-    if (payload.indexOf("\"wifi\"") > -1) {
-      display.println("WiFi: Connecting...");
-    }
-    if (payload.indexOf("\"server\"") > -1) {
-      display.println("Server: Connecting...");
-    }
-    if (payload.indexOf("\"payment\"") > -1) {
-      display.println("Payment: Success!");
-    }
-    if (payload.indexOf("\"transaction\"") > -1) {
-      display.println("DB: Transaction OK");
-    }
-    if (payload.indexOf("\"attempt\"") > -1) {
-      display.println("Attempt: 1/2/3");
-    }
-    if (payload.indexOf("\"complete\"") > -1) {
-      display.println("Complete: Thank You!");
-    }
-
+    display.println(payload);
     display.display();
-  } else if (httpResponseCode == 401) {
-    Serial.println("Unauthorized access to /display.");
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("Unauthorized");
-    display.display();
+
+    // Check if payment status is success
+    if (payload.indexOf("\"paymentStatus\":\"success\"") > -1) {
+      Serial.println("Payment successful, starting motor...");
+      startMotor();  // Start the motor when payment is successful
+    }
   } else {
     Serial.println("Error fetching /display: " + String(httpResponseCode));
     display.clearDisplay();
     display.setCursor(0, 0);
     display.println("Error fetching data!");
     display.display();
+  }
+
+  http.end();
+}
+
+void initializeRefund() {
+  Serial.println("Motor stopped after timeout. Initializing refund process...");
+  
+  // Send a refund request or update payment status
+  HTTPClient http;
+  String fullURL = String(serverIP) + "/update-payment-status";
+  http.begin(fullURL);
+
+  String postData = "{\"paymentStatus\":\"ready\", \"authCode\":\"" + String(authCode) + "\"}";
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.POST(postData);
+  if (httpResponseCode == 200) {
+    Serial.println("Payment status updated to 'ready' after motor timeout.");
+  } else {
+    Serial.println("Failed to update payment status to 'ready'.");
+  }
+
+  http.end();
+}
+
+void startRefundProcess() {
+  Serial.println("Payment timeout! Starting refund process...");
+
+  // Send refund request
+  HTTPClient http;
+  http.begin(refundURL);
+  http.addHeader("Content-Type", "application/json");
+
+  String postData = "{\"authCode\":\"" + String(authCode) + "\"}";
+  int httpResponseCode = http.POST(postData);
+
+  if (httpResponseCode == 200) {
+    Serial.println("Refund process initiated.");
+    // Set payment status to "ready"
+    updatePaymentStatus();
+  } else {
+    Serial.println("Refund request failed!");
+  }
+
+  http.end();
+}
+
+void updatePaymentStatus() {
+  HTTPClient http;
+  String url = "https://pad-ew3v.onrender.com/update-payment-status";  // Replace with your server's IP or domain
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  // Make sure the authCode matches the one set on the server
+  String jsonPayload = "{\"paymentStatus\":\"ready\", \"authCode\":\"your_secret_auth_code\"}";
+
+  // Send the POST request
+  int httpResponseCode = http.POST(jsonPayload);
+
+  if (httpResponseCode == 200) {
+    Serial.println("Payment status updated to ready successfully.");
+  } else {
+    Serial.println("Failed to update payment status. HTTP response code: " + String(httpResponseCode));
+    String response = http.getString();
+    Serial.println("Server response: " + response);
+  }
+
+  http.end();
+}
+
+
+void sendSystemError() {
+  HTTPClient http;
+  String fullURL = String(serverIP) + "/system-error";
+  http.begin(fullURL);
+
+  String postData = "{\"reason\":\"IR interrupt not detected\"}";
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.POST(postData);
+  if (httpResponseCode == 200) {
+    Serial.println("System error reported to server.");
+  } else {
+    Serial.println("Failed to report system error to server.");
   }
 
   http.end();

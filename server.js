@@ -90,14 +90,14 @@ app.get('/display', (req, res) => {
     paymentStatus: systemState.paymentStatus,
     systemStatus: systemState.padCount > 0 ? 'active' : 'inactive',
     dispensing: systemState.dispensing,
-    messages: {
-      wifi: "Connecting to WiFi...",
-      server: "Connecting to server...",
-      payment: "Payment successful.",
-      transaction: "DB transaction written.",
-      attempt: "Attempt 1/2/3",
-      complete: "Dispense complete. Thank you!",
-    },
+    // messages: {
+    //   wifi: "Connecting to WiFi...",
+    //   server: "Connecting to server...",
+    //   payment: "Payment successful.",
+    //   transaction: "DB transaction written.",
+    //   attempt: "Attempt 1/2/3",
+    //   complete: "Dispense complete. Thank you!",
+    // },
   });
 });
 
