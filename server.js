@@ -47,7 +47,7 @@ function authMiddleware(req, res, next) {
 
 // Home Route
 app.get('/', (req, res) => res.redirect('/payment'));
-app.get('/reset', (req, res) => res.render('/admin'));
+
 // Admin Dashboard
 app.get('/admin', async (req, res) => {
   try {
@@ -110,6 +110,7 @@ app.get('/payment', (req, res) => {
   });
 });
 
+
 // Create Razorpay Order
 app.post('/create-order', async (req, res) => {
   try {
@@ -170,7 +171,7 @@ app.post('/sensor-interrupt', (req, res) => {
   }
 });
 
-// Refund System// Refund System
+// Refund System
 app.post('/refund', async (req, res) => {
   const { paymentId, reason } = req.body;
 
@@ -185,8 +186,9 @@ app.post('/refund', async (req, res) => {
       systemState.paymentStatus = 'refunded';
       systemState.currentPaymentId = paymentId; // Store the paymentId of the refunded payment
 
-      // Handle the Razorpay refund
-      const refund = await razorpay.payments.refund(paymentId);
+      // Refund the payment
+      const refund = await razorpay.payments.refund(paymentId);  // Ensure paymentId is valid
+
       console.log('Refund successful:', refund);
 
       // Send the refund email notification

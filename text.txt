@@ -16,9 +16,12 @@ const char* updatePaymentStatusURL = "https://pad-ew3v.onrender.com/update-payme
 const char* authCode = "your_secret_auth_code";
 const char* serverIP = "https://pad-ew3v.onrender.com";  // or any other server URL you want
 
-// Motor and IR sensor configuration
-const int motorPin = 12;
-const int irSensorPin = 14;
+// Motor and IR sensor configuration for L298N
+const int motorPin1 = 23;  // Motor direction pin 1 (IN1)
+const int motorPin2 = 22;  // Motor direction pin 2 (IN2)
+const int motorEnablePin = 21;  // Motor enable pin (EN)
+const int irSensorPin = 15;  // Adjust the pin number based on your wiring
+
 unsigned long motorStartTime = 0;
 const unsigned long motorTimeout = 10000;  // 10 seconds timeout
 bool motorStarted = false;
@@ -42,7 +45,7 @@ void sendSystemError();
 void startMotor();
 void stopMotor();
 void updatePaymentStatus();
-void startRefundProcess();
+void startRefundProcess(const String& paymentId, const String& reason);
 void updatePadCount();
 
 // Sensor Interrupt
@@ -56,13 +59,15 @@ void startMotor() {
   if (!motorStarted) {  // Ensure motor only starts if not already running
     motorStarted = true;
     motorStartTime = millis();  // Start the motor and record the time
-    digitalWrite(motorPin, HIGH);  // Turn motor ON
+    digitalWrite(motorPin1, HIGH);  // Set direction pin 1
+    digitalWrite(motorPin2, LOW);   // Set direction pin 2
+    digitalWrite(motorEnablePin, HIGH);  // Enable motor
     Serial.println("Motor started.");
   }
 }
 
 void stopMotor() {
-  digitalWrite(motorPin, LOW);  // Turn motor OFF
+  digitalWrite(motorEnablePin, LOW);  // Disable motor
   motorStarted = false;
   Serial.println("Motor stopped.");
   updatePaymentStatus();  // Update payment status when the motor stops
@@ -71,13 +76,15 @@ void stopMotor() {
 void setup() {
   Serial.begin(115200);
   pinMode(ledPin, OUTPUT);
-  pinMode(motorPin, OUTPUT);
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(motorEnablePin, OUTPUT);
   pinMode(irSensorPin, INPUT_PULLUP);
 
   // Attach the interrupt to the IR sensor
   attachInterrupt(digitalPinToInterrupt(irSensorPin), sensorInterrupt, FALLING);
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
     Serial.println("SSD1306 allocation failed!");
     for (;;);
   }
@@ -106,13 +113,11 @@ void loop() {
   // If motor is running, check for timeout and IR interrupt
   if (motorStarted) {
     unsigned long currentTime = millis();
-    if (currentTime - motorStartTime >= motorTimeout) {
-      if (!irInterruptDetected) {
-        // If no IR interrupt after 10 seconds, stop motor and initiate refund
-        Serial.println("No IR interrupt detected within 10 seconds. Stopping motor and initiating refund.");
-        stopMotor();  // Stop motor
-        startRefundProcess();  // Start refund process
-      }
+    if (currentTime - motorStartTime >= motorTimeout && !irInterruptDetected) {
+      // If no IR interrupt after 10 seconds, stop motor and initiate refund
+      Serial.println("No IR interrupt detected within 10 seconds. Stopping motor and initiating refund.");
+      stopMotor();  // Stop motor
+      startRefundProcess("some_payment_id", "Payment timeout, no IR sensor interrupt.");  // Start refund process
     }
   }
 
@@ -166,16 +171,25 @@ void fetchAndDisplayData() {
   if (httpResponseCode == 200) {
     String payload = http.getString();
     Serial.println("Display Data from /display: " + payload);
+
+    // Parse the response to check for "dispensing"
+    if (payload.indexOf("\"dispensing\":false") > -1) {
+      if (motorStarted) {
+        Serial.println("Dispensing is false. Stopping motor...");
+        stopMotor();
+      }
+    } else if (payload.indexOf("\"dispensing\":true") > -1) {
+      if (!motorStarted) {
+        Serial.println("Dispensing is true. Starting motor...");
+        startMotor();
+      }
+    }
+
+    // Display the data on the OLED screen
     display.clearDisplay();
     display.setCursor(0, 0);
     display.println(payload);
     display.display();
-
-    // Check for payment success
-    if (payload.indexOf("\"paymentStatus\":\"success\"") > -1 && !motorStarted) {
-      Serial.println("Payment successful, starting motor...");
-      startMotor();  // Start motor when payment is successful and motor is not already running
-    }
   } else {
     Serial.println("Error fetching /display: " + String(httpResponseCode));
     display.clearDisplay();
@@ -187,28 +201,25 @@ void fetchAndDisplayData() {
   http.end();
 }
 
-void startRefundProcess() {
-  Serial.println("Payment timeout! Starting refund process...");
+void startRefundProcess(const String& paymentId, const String& reason) {
+  Serial.println("Starting refund process...");
 
-  // Assume the payment ID is stored in a variable, which you can get from the response of /display
-  String paymentId = "some_payment_id";  // Replace with actual payment ID from your response data
-  String reason = "Payment timeout, no IR sensor interrupt.";  // Reason for the refund
-
-  // Send refund request
   HTTPClient http;
-  String refundPostUrl = refundURL;  // The URL you are sending the refund request to
-  http.begin(refundPostUrl);
+  http.begin(refundURL);
   http.addHeader("Content-Type", "application/json");
 
-  // Prepare the JSON data
+  // Prepare JSON payload
   String postData = "{\"paymentId\":\"" + paymentId + "\", \"reason\":\"" + reason + "\"}";
 
   int httpResponseCode = http.POST(postData);
 
   if (httpResponseCode == 200) {
-    Serial.println("Refund process initiated.");
-    // Set payment status to "ready"
-    updatePaymentStatus();  // Optionally update payment status if needed after refund
+    Serial.println("Refund process initiated successfully.");
+    String response = http.getString();
+    Serial.println("Server response: " + response);
+    
+    // Update payment status to 'ready' after refund is processed
+    updatePaymentStatus();
   } else {
     Serial.println("Refund request failed!");
     String response = http.getString();
@@ -217,6 +228,7 @@ void startRefundProcess() {
 
   http.end();
 }
+
 
 void updatePaymentStatus() {
   HTTPClient http;
