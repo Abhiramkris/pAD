@@ -271,3 +271,23 @@ void sendSystemError() {
 
   http.end();
 }
+
+
+
+db connection 
+admin login 
+admin logs 
+admin payments 
+admin switch on off reset the state 
+
+
+#esp32 
+email function 
+display function 
+log function 
+payment function 
+refund fuinction 
+start motor function 
+ir trigger function 
+hall effect sensor funtion 
+

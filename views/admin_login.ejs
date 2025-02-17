@@ -1,21 +1,25 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Login</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <h1>Admin Login</h1>
-  <form action="/admin" method="post">
-    <label for="username">Username:</label>
-    <input type="text" id="username" name="username" required><br>
-    
-    <label for="password">Password:</label>
-    <input type="password" id="password" name="password" required><br>
-    
+  <% if (typeof error !== 'undefined') { %>
+    <p style="color:red;"><%= error %></p>
+  <% } %>
+  <form action="/admin/login" method="POST">
+    <div>
+      <label for="username">Username:</label>
+      <input type="text" name="username" id="username" required>
+    </div>
+    <div>
+      <label for="password">Password:</label>
+      <input type="password" name="password" id="password" required>
+    </div>
     <button type="submit">Login</button>
   </form>
 </body>
 </html>
-    

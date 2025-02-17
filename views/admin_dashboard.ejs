@@ -1,38 +1,77 @@
--<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <h1>Admin Dashboard</h1>
+  <h1>Welcome, <%= admin.username %></h1>
   
-  <h2>System Status</h2>
-  <p>Pad Count: <%= systemState.padCount %></p>
-  <p>Payment Status: <%= systemState.paymentStatus %></p>
+  <h2>System State</h2>
+  <ul>
+    <li>Pad Count: <%= systemState.padCount %></li>
+    <li>Payment Status: <%= systemState.paymentStatus %></li>
+    <li>Dispensing: <%= systemState.dispensing ? 'Yes' : 'No' %></li>
+    <li>Transaction Completed: <%= systemState.transactionCompleted ? 'Yes' : 'No' %></li>
+  </ul>
+
+  <h2>Actions</h2>
+  <form action="/admin/state" method="POST">
+    <button name="action" value="reset" type="submit">Reset System</button>
+    <button name="action" value="switch_on" type="submit">Switch On</button>
+    <button name="action" value="switch_off" type="submit">Switch Off</button>
+  </form>
   
-  <h2>Transaction History</h2>
-  <table>
-    <tr>
-      <th>Order ID</th>
-      <th>Payment ID</th>
-      <th>Amount</th>
-      <th>Status</th>
-      <th>Pad Count</th>
-      <th>Created At</th>
-    </tr>
-    <% transactions.forEach(transaction => { %>
+  <form action="/update-pad-count" method="POST">
+    <label for="count">Update Pad Count:</label>
+    <input type="number" name="count" id="count" value="<%= systemState.padCount %>">
+    <button type="submit">Update</button>
+  </form>
+
+  <h2>Recent Payments</h2>
+  <table border="1">
+    <thead>
       <tr>
-        <td><%= transaction.order_id %></td>
-        <td><%= transaction.payment_id %></td>
-        <td><%= transaction.amount %></td>
-        <td><%= transaction.status %></td>
-        <td><%= transaction.pad_count %></td>
-        <td><%= transaction.created_at %></td>
+        <th>Order ID</th>
+        <th>Payment ID</th>
+        <th>Amount</th>
+        <th>Status</th>
+        <th>Created At</th>
       </tr>
-    <% }) %>
+    </thead>
+    <tbody>
+      <% payments.forEach(payment => { %>
+        <tr>
+          <td><%= payment.order_id %></td>
+          <td><%= payment.payment_id || 'N/A' %></td>
+          <td><%= payment.amount %></td>
+          <td><%= payment.status %></td>
+          <td><%= payment.created_at %></td>
+        </tr>
+      <% }); %>
+    </tbody>
   </table>
-  <a href="/reset"><button>reset</button></a>
+
+  <h2>Recent Logs</h2>
+  <table border="1">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Message</th>
+        <th>Created At</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% logs.forEach(log => { %>
+        <tr>
+          <td><%= log.type %></td>
+          <td><%= log.message %></td>
+          <td><%= log.created_at %></td>
+        </tr>
+      <% }); %>
+    </tbody>
+  </table>
+  
 </body>
 </html>
