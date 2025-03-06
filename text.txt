@@ -291,3 +291,81 @@ start motor function
 ir trigger function 
 hall effect sensor funtion 
 
+
+
+-- Drop the 'admins' table if it exists
+DROP TABLE IF EXISTS `admins`;
+
+-- Create the 'admins' table
+CREATE TABLE `admins` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `username` VARCHAR(50) NOT NULL,
+  `hashed_password` VARCHAR(255) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Insert data into the 'admins' table
+INSERT INTO `admins` (`id`, `username`, `hashed_password`) VALUES
+(1, 'admin', '$2a$12$SVpAAfnI2qu0VMNbUYtmv.uGp4WLBV4b4WirQkmpYCeUmEvufATqS');
+
+-- Drop the 'logs' table if it exists
+DROP TABLE IF EXISTS `logs`;
+
+-- Create the 'logs' table
+CREATE TABLE `logs` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `type` VARCHAR(50) DEFAULT NULL,
+  `message` TEXT DEFAULT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Insert data into the 'logs' table
+INSERT INTO `logs` (`id`, `type`, `message`, `created_at`) VALUES
+(1, 'payment', 'Payment verified: pay_Pw40U2CtLllXlO', '2025-02-15 17:10:18'),
+(2, 'admin', 'Admin admin logged in', '2025-02-15 17:17:44'),
+(3, 'state', 'System reset to default state', '2025-02-15 17:17:49'),
+(4, 'state', 'System switched off', '2025-02-15 17:18:03'),
+(5, 'state', 'System switched on', '2025-02-15 17:18:52'),
+(6, 'state', 'System switched off', '2025-02-15 17:21:04'),
+(7, 'state', 'System switched on', '2025-02-15 17:21:22'),
+(8, 'admin', 'Admin admin logged in', '2025-02-16 06:24:20');
+
+-- Drop the 'payments' table if it exists
+DROP TABLE IF EXISTS `payments`;
+
+-- Create the 'payments' table
+CREATE TABLE `payments` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `order_id` VARCHAR(100) NOT NULL,
+  `payment_id` VARCHAR(100) DEFAULT NULL,
+  `amount` INT NOT NULL,
+  `status` VARCHAR(20) NOT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `order_id` (`order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Insert data into the 'payments' table
+INSERT INTO `payments` (`id`, `order_id`, `payment_id`, `amount`, `status`, `created_at`) VALUES
+(1, 'order_Pw3zeXlrkFy2mi', 'pay_Pw40U2CtLllXlO', 600, 'success', '2025-02-15 17:09:16'),
+(2, 'order_Pw4926vzAPNbhf', NULL, 600, 'pending', '2025-02-15 17:18:09');
+
+-- Drop the 'system_state' table if it exists
+DROP TABLE IF EXISTS `system_state`;
+
+-- Create the 'system_state' table
+CREATE TABLE `system_state` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `pad_count` INT NOT NULL,
+  `payment_status` VARCHAR(20) NOT NULL,
+  `dispensing` TINYINT(1) NOT NULL,
+  `transaction_completed` TINYINT(1) NOT NULL,
+  `last_updated` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `inactive_since` DATETIME DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Insert data into the 'system_state' table
+INSERT INTO `system_state` (`id`, `pad_count`, `payment_status`, `dispensing`, `transaction_completed`, `last_updated`, `inactive_since`) VALUES
+(1, 20, 'ready', 0, 0, '2025-02-15 17:21:22', NULL);
