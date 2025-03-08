@@ -255,7 +255,7 @@ app.get('/dispensing', async (req, res) => {
 // Create Razorpay Order
 app.post('/create-order', async (req, res) => {
   try {
-    const options = { amount: 600, currency: 'INR', receipt: `order_${Date.now()}` };
+    const options = { amount: 530, currency: 'INR', receipt: `order_${Date.now()}` };
     const order = await razorpay.orders.create(options);
     systemState.currentOrderId = order.id;
     await pool.execute(
@@ -416,6 +416,21 @@ app.post('/system-error', async (req, res) => {
 
 // Check System Status (for device monitoring)
 app.get('/check', async (req, res) => {
+  const authCodeParam = req.query.authCode;
+  if (authCodeParam !== process.env.AUTH_CODE) {
+    return res.status(401).json({ status: 'unauthorized' });
+  }
+  const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
+  const state = rows[0];
+  res.json({
+    padCount: state.pad_count,
+    paymentStatus: state.payment_status,
+    systemStatus: state.pad_count > 0 ? 'active' : 'inactive',
+    dispensing: state.dispensing,
+  });
+});
+
+app.get('/display', async (req, res) => {
   const authCodeParam = req.query.authCode;
   if (authCodeParam !== process.env.AUTH_CODE) {
     return res.status(401).json({ status: 'unauthorized' });
