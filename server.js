@@ -435,15 +435,25 @@ app.get('/display', async (req, res) => {
   if (authCodeParam !== process.env.AUTH_CODE) {
     return res.status(401).json({ status: 'unauthorized' });
   }
+  
   const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
   const state = rows[0];
+  
+  // Force "dispensing" to be true if payment is successful and the transaction is completed.
+  // This change is intended to signal the ESP32 to start the motor.
+  let dispensing = false;
+  if (state.payment_status === 'success' && state.transaction_completed) {
+    dispensing = true;
+  }
+  
   res.json({
     padCount: state.pad_count,
     paymentStatus: state.payment_status,
     systemStatus: state.pad_count > 0 ? 'active' : 'inactive',
-    dispensing: state.dispensing,
+    dispensing: dispensing
   });
 });
+
 
 // Endpoint to send a custom email to the admin
 app.post('/send-custom-email', async (req, res) => {
