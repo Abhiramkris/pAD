@@ -502,7 +502,7 @@ app.get('/display', async (req, res) => {
     padCount: state.pad_count,
     paymentStatus: state.payment_status,
     systemStatus: state.pad_count > 0 ? 'active' : 'inactive',
-    dispensing: dispensing
+    dispensing: state.dispensing  // Make sure this is included
   });
 });
 
