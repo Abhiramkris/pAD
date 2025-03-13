@@ -1,0 +1,333 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+// WiFi Credentials
+const char* ssid = "asdf";
+const char* password = "";
+
+// Server URLs
+const char* checkURL = "https://pad-ew3v.onrender.com/check";
+const char* displayURL = "https://pad-ew3v.onrender.com/display";
+const char* refundURL = "https://pad-ew3v.onrender.com/refund";
+const char* updatePaymentStatusURL = "https://pad-ew3v.onrender.com/update-payment-status";
+const char* authCode = "your_secret_auth_code";
+const char* serverIP = "https://pad-ew3v.onrender.com";  // or any other server URL you want
+
+// Motor and IR sensor configuration for L298N
+const int motorPin1 = 23;  // Motor direction pin 1 (IN1)
+const int motorPin2 = 18;  // Motor direction pin 2 (IN2)
+const int motorEnablePin = 5;  // Motor enable pin (ENA)
+const int irSensorPin = 15;  // IR sensor pin (with INPUT_PULLUP)
+
+// Hall effect sensor configuration
+const int hallSensorPin = 4; // Connect the digital output of the hall effect sensor here
+volatile int hallTriggerCount = 0;         // Counts complete rotations (or sensor triggers)
+volatile unsigned long lastHallTriggerTime = 0;  // For debouncing
+const unsigned long hallDebounceDelay = 50;  // Debounce delay in milliseconds
+
+// Timing and state variables for motor control
+unsigned long motorStartTime = 0;
+const unsigned long motorTimeout = 10000;  // Motor timeout in milliseconds
+bool motorStarted = false;
+bool irInterruptDetected = false;
+
+// OLED Display Configuration
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// LED Pin
+const int ledPin = 2;
+
+// Pad Count Variable (Note: This local variable is separate from any server-side count)
+int padCount = 0; // Variable to track pad count (if needed)
+
+// Function Declarations
+void fetchCheckStatus();
+void fetchAndDisplayData();
+void sendSystemError();
+void startMotor();
+void stopMotor();
+void updatePaymentStatus();
+void startRefundProcess(const String& paymentId, const String& reason);
+void updatePadCount();
+
+// IR Sensor Interrupt ISR (for pad dispensing)
+void IRAM_ATTR irSensorISR() {
+  irInterruptDetected = true;  // Set the flag when the IR sensor is triggered
+  padCount++; // Increment pad count on IR sensor interruption
+  Serial.println("IR sensor triggered! Pad dispensed.");
+}
+
+// Hall Effect Sensor ISR (for rotation detection)
+void IRAM_ATTR hallSensorISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastHallTriggerTime > hallDebounceDelay) {
+    hallTriggerCount++;
+    lastHallTriggerTime = currentTime;
+    Serial.print("Hall sensor triggered. Count: ");
+    Serial.println(hallTriggerCount);
+  }
+}
+
+void startMotor() {
+  if (!motorStarted) {  // Ensure motor only starts if not already running
+    motorStarted = true;
+    motorStartTime = millis();  // Record motor start time
+    digitalWrite(motorPin1, HIGH);  // Set motor direction pin 1
+    digitalWrite(motorPin2, LOW);   // Set motor direction pin 2
+    digitalWrite(motorEnablePin, HIGH);  // Enable motor
+    Serial.println("Motor started.");
+  }
+}
+
+void stopMotor() {
+  digitalWrite(motorEnablePin, LOW);  // Disable motor
+  motorStarted = false;
+  Serial.println("Motor stopped.");
+  updatePaymentStatus();  // Update payment status when the motor stops
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Set pin modes for motor and sensors
+  pinMode(ledPin, OUTPUT);
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(motorEnablePin, OUTPUT);
+  pinMode(irSensorPin, INPUT_PULLUP);
+  pinMode(hallSensorPin, INPUT_PULLUP);  // Using internal pull-up for hall sensor
+
+  // Ensure motor is off at startup
+  digitalWrite(motorPin1, LOW);
+  digitalWrite(motorPin2, LOW);
+  digitalWrite(motorEnablePin, LOW);
+
+  // Attach interrupts:
+  attachInterrupt(digitalPinToInterrupt(irSensorPin), irSensorISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(hallSensorPin), hallSensorISR, RISING);
+
+  // Initialize OLED display
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  // Adjust address if needed
+    Serial.println("SSD1306 allocation failed!");
+    for (;;);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("Initializing...");
+  display.display();
+
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  display.println("Connecting to WiFi...");
+  display.display();
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi connected!");
+  display.println("WiFi Connected!");
+  display.display();
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+
+  // Motor and Sensor Logic:
+  if (motorStarted) {
+    // Check for overall motor timeout (regardless of sensor triggers)
+    if (currentTime - motorStartTime >= motorTimeout) {
+      Serial.println("Motor timeout reached. Initiating refund.");
+      stopMotor();
+      startRefundProcess("some_payment_id", "Motor timeout reached before proper sensor detection.");
+      hallTriggerCount = 0;  // Reset hall sensor count
+      irInterruptDetected = false;  // Reset IR sensor flag
+    }
+    // Check if hall effect sensor has detected 3 rotations
+    if (hallTriggerCount >= 3) {
+      if (!irInterruptDetected) {
+        Serial.println("3 hall sensor triggers detected but no IR sensor interrupt. Initiating refund.");
+        stopMotor();
+        startRefundProcess("some_payment_id", "No IR sensor interrupt detected after 3 hall sensor rotations.");
+      } else {
+        Serial.println("Hall sensor and IR sensor both indicate successful dispense. Stopping motor.");
+        stopMotor();
+        updatePaymentStatus();
+      }
+      // Reset counters after handling the event
+      hallTriggerCount = 0;
+      irInterruptDetected = false;
+    }
+  }
+
+  // If IR sensor is triggered at any time (even before hall count condition met)
+  if (irInterruptDetected && motorStarted) {
+    Serial.println("IR sensor triggered. Dispense confirmed. Stopping motor.");
+    stopMotor();
+    updatePaymentStatus();
+    hallTriggerCount = 0; // Reset hall sensor counter
+    irInterruptDetected = false;  // Reset IR sensor flag
+  }
+
+  // Fetch and display data
+  if (WiFi.status() == WL_CONNECTED) {
+    fetchCheckStatus();
+    fetchAndDisplayData();
+  } else {
+    Serial.println("WiFi not connected!");
+  }
+
+  delay(5000);  // Poll every 5 seconds
+}
+
+void fetchCheckStatus() {
+  HTTPClient http;
+  String fullURL = String(checkURL) + "?authCode=" + authCode;
+  http.begin(fullURL);
+
+  int httpResponseCode = http.GET();
+  if (httpResponseCode == 200) {
+    String payload = http.getString();
+    Serial.println("System Status from /check: " + payload);
+    if (payload.indexOf("\"systemStatus\":\"active\"") > -1) {
+      digitalWrite(ledPin, HIGH);
+    } else {
+      digitalWrite(ledPin, LOW);
+    }
+  } else {
+    Serial.println("Error fetching /check status: " + String(httpResponseCode));
+    digitalWrite(ledPin, LOW);
+  }
+
+  http.end();
+}
+
+void fetchAndDisplayData() {
+  HTTPClient http;
+  String fullURL = String(displayURL) + "?authCode=" + authCode;
+  http.begin(fullURL);
+
+  int httpResponseCode = http.GET();
+  if (httpResponseCode == 200) {
+    String payload = http.getString();
+    Serial.println("Display Data from /display: " + payload);
+
+    // Parse the response to check for "dispensing"
+    if (payload.indexOf("\"dispensing\":false") > -1) {
+      if (motorStarted) {
+        Serial.println("Dispensing is false. Stopping motor...");
+        stopMotor();
+      }
+    } else if (payload.indexOf("\"dispensing\":true") > -1) {
+      if (!motorStarted) {
+        Serial.println("Dispensing is true. Starting motor...");
+        startMotor();
+      }
+    }
+
+    // Display the data on the OLED screen
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println(payload);
+    display.display();
+  } else {
+    Serial.println("Error fetching /display: " + String(httpResponseCode));
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("Error fetching data!");
+    display.display();
+  }
+
+  http.end();
+}
+
+void startRefundProcess(const String& paymentId, const String& reason) {
+  Serial.println("Starting refund process...");
+
+  HTTPClient http;
+  http.begin(refundURL);
+  http.addHeader("Content-Type", "application/json");
+
+  String postData = "{\"paymentId\":\"" + paymentId + "\", \"reason\":\"" + reason + "\"}";
+  int httpResponseCode = http.POST(postData);
+
+  if (httpResponseCode == 200) {
+    Serial.println("Refund process initiated successfully.");
+    String response = http.getString();
+    Serial.println("Server response: " + response);
+    
+    updatePaymentStatus();
+    setDispensingStatus(false);  // Set dispensing to false after refund starts
+  } else {
+    Serial.println("Refund request failed!");
+    String response = http.getString();
+    Serial.println("Server response: " + response);
+  }
+
+  http.end();
+}
+
+void setDispensingStatus(bool status) {
+  HTTPClient http;
+  String fullURL = String(displayURL) + "?authCode=" + authCode;
+  http.begin(fullURL);
+  http.addHeader("Content-Type", "application/json");
+
+  String postData = "{\"dispensing\":" + String(status ? "true" : "false") + "}";
+  int httpResponseCode = http.POST(postData);
+
+  if (httpResponseCode == 200) {
+    Serial.println("Dispensing status updated successfully.");
+  } else {
+    Serial.println("Failed to update dispensing status. HTTP response code: " + String(httpResponseCode));
+    String response = http.getString();
+    Serial.println("Server response: " + response);
+  }
+
+  http.end();
+}
+
+void updatePaymentStatus() {
+  HTTPClient http;
+  String url = updatePaymentStatusURL;
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonPayload = "{\"paymentStatus\":\"ready\", \"authCode\":\"" + String(authCode) + "\"}";
+  int httpResponseCode = http.POST(jsonPayload);
+
+  if (httpResponseCode == 200) {
+    Serial.println("Payment status updated to ready successfully.");
+  } else {
+    Serial.println("Failed to update payment status. HTTP response code: " + String(httpResponseCode));
+    String response = http.getString();
+    Serial.println("Server response: " + response);
+  }
+
+  http.end();
+}
+
+void sendSystemError() {
+  HTTPClient http;
+  String fullURL = String(serverIP) + "/system-error";
+  http.begin(fullURL);
+
+  String postData = "{\"reason\":\"IR interrupt not detected\"}";
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.POST(postData);
+  if (httpResponseCode == 200) {
+    Serial.println("System error reported to server.");
+  } else {
+    Serial.println("Failed to report system error to server.");
+  }
+
+  http.end();
+}

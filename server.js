@@ -414,6 +414,47 @@ app.post('/system-error', async (req, res) => {
   }
 });
 
+
+// Update Payment Status Endpoint (for ESP32)
+app.post('/update-payment-status', async (req, res) => {
+  const { paymentStatus, authCode } = req.body;
+
+  // Authentication check
+  if (authCode !== process.env.AUTH_CODE) {
+    await addLog('error', 'Unauthorized payment status update attempt');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  // Validate payment status
+  const validStatuses = ['ready', 'success', 'refunded', 'failed'];
+  if (!validStatuses.includes(paymentStatus)) {
+    return res.status(400).json({ error: 'Invalid payment status' });
+  }
+
+  try {
+    // Update system state
+    systemState.paymentStatus = paymentStatus;
+    
+    // Reset related states if setting to 'ready'
+    if (paymentStatus === 'ready') {
+      systemState.currentOrderId = null;
+      systemState.currentPaymentId = null;
+      systemState.dispensing = false;
+      systemState.transactionCompleted = false;
+    }
+
+    await updateSystemState();
+    await addLog('status', `Payment status manually updated to: ${paymentStatus}`);
+    
+    res.json({ success: true, newStatus: paymentStatus });
+  } catch (error) {
+    console.error('Status update error:', error);
+    await addLog('error', `Status update failed: ${error.message}`);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
 // Check System Status (for device monitoring)
 app.get('/check', async (req, res) => {
   const authCodeParam = req.query.authCode;
@@ -489,8 +530,6 @@ app.post('/send-custom-email', async (req, res) => {
   }
 });
 
-// -----------------------
-// Start Server
-// -----------------------
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
