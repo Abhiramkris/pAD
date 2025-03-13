@@ -415,6 +415,7 @@ app.post('/system-error', async (req, res) => {
 });
 
 
+
 // Update Payment Status Endpoint (for ESP32)
 app.post('/update-payment-status', async (req, res) => {
   const { paymentStatus, authCode } = req.body;
@@ -432,21 +433,31 @@ app.post('/update-payment-status', async (req, res) => {
   }
 
   try {
-    // Update system state
-    systemState.paymentStatus = paymentStatus;
-    
-    // Reset related states if setting to 'ready'
+    // Always reduce pad count when ESP32 confirms completion
     if (paymentStatus === 'ready') {
-      systemState.currentOrderId = null;
-      systemState.currentPaymentId = null;
-      systemState.dispensing = false;
-      systemState.transactionCompleted = false;
+      systemState.padCount = Math.max(0, systemState.padCount - 1);
     }
 
-    await updateSystemState();
-    await addLog('status', `Payment status manually updated to: ${paymentStatus}`);
+    // Update full system state
+    systemState.paymentStatus = paymentStatus;
+    systemState.currentOrderId = null;
+    systemState.currentPaymentId = null;
+    systemState.dispensing = false;
+    systemState.transactionCompleted = false;
+
+    // Update database
+    await pool.execute(
+      'UPDATE system_state SET pad_count = ?, payment_status = ?, dispensing = ?, transaction_completed = ? WHERE id = 1',
+      [systemState.padCount, paymentStatus, false, false]
+    );
+
+    await addLog('dispense', `Pad dispensed. New count: ${systemState.padCount}`);
     
-    res.json({ success: true, newStatus: paymentStatus });
+    res.json({ 
+      success: true, 
+      newStatus: paymentStatus,
+      padCount: systemState.padCount
+    });
   } catch (error) {
     console.error('Status update error:', error);
     await addLog('error', `Status update failed: ${error.message}`);
