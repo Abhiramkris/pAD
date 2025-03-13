@@ -433,9 +433,12 @@ app.post('/update-payment-status', async (req, res) => {
   }
 
   try {
-    // Always reduce pad count when ESP32 confirms completion
-    if (paymentStatus === 'ready') {
+    const previousStatus = systemState.paymentStatus;
+    
+    // Only reduce count when transitioning from success->ready
+    if (paymentStatus === 'ready' && previousStatus === 'success') {
       systemState.padCount = Math.max(0, systemState.padCount - 1);
+      await addLog('inventory', `Pad dispensed. New count: ${systemState.padCount}`);
     }
 
     // Update full system state
