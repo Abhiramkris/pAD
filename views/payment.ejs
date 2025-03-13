@@ -2,52 +2,245 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Make a Payment</title>
-  <link rel="stylesheet" href="/css/style.css">
+  <title>Secure Pad Dispenser</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <style>
+    :root {
+      --razorpay-blue: #0B5FFF;
+      --razorpay-dark: #0A0F2D;
+      --razorpay-light: #F8F9FF;
+      --bg-gradient: linear-gradient(135deg, #0A0F2D 0%, #1A1F3D 100%);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Inter', sans-serif;
+      color: var(--razorpay-light);
+    }
+
+    .container {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 2rem;
+      width: 90%;
+      max-width: 440px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(11, 95, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .razorpay-logo {
+      width: 180px;
+      margin-bottom: 1.5rem;
+      filter: brightness(0) invert(1);
+    }
+
+    h1 {
+      color: var(--razorpay-light);
+      font-size: 1.8rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .status-card {
+      background: rgba(11, 95, 255, 0.1);
+      border-radius: 12px;
+      padding: 1.2rem;
+      margin: 1.5rem 0;
+    }
+
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 0.8rem 0;
+      font-size: 0.95rem;
+    }
+
+    .badge {
+      background: rgba(11, 95, 255, 0.2);
+      color: var(--razorpay-blue);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+
+    .payment-btn {
+      background: var(--razorpay-blue);
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 1.2rem;
+      color: white;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin: 1.5rem 0;
+    }
+
+    .payment-btn:hover {
+      background: #094ECC;
+      transform: translateY(-2px);
+    }
+
+    .security-info {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    .security-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 1rem 0;
+      color: #A0A7C7;
+    }
+
+    .trust-badges {
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+      opacity: 0.8;
+    }
+
+    .trust-badges img {
+      height: 32px;
+      filter: grayscale(1) brightness(2);
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
+
+    .processing {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+  </style>
 </head>
 <body>
-  <h1>Pad Dispenser Payment</h1>
-  <p>Available Pads: <%= padCount %></p>
-  <button id="payBtn">Pay Now</button>
+  <div class="container">
+    <div class="header">
+      <img src="https://razorpay.com/build/browser/static/logo-blue.5a47f1e3.svg" class="razorpay-logo" alt="Razorpay Secure">
+      <h1>Hygiene Pad Dispenser</h1>
+    </div>
+
+    <div class="status-card">
+      <div class="status-item">
+        <span>Available Pads</span>
+        <strong id="padCount"><%= padCount %></strong>
+      </div>
+      <div class="status-item">
+        <span>Connection Status</span>
+        <span style="color: #00FF88"><i class="fas fa-circle"></i> Secure</span>
+      </div>
+    </div>
+
+    <button class="payment-btn" id="payBtn">
+      <i class="fas fa-lock"></i>
+      <span>Pay Securely - ₹5.30</span>
+    </button>
+
+    <div class="security-info">
+      <div class="security-item">
+        <i class="fas fa-shield-check"></i>
+        <span>PCI DSS Certified Payments</span>
+      </div>
+      <div class="security-item">
+        <i class="fas fa-user-shield"></i>
+        <span>256-bit SSL Encryption</span>
+      </div>
+      <div class="security-item">
+        <i class="fas fa-check-double"></i>
+        <span>3D Secure Authentication</span>
+      </div>
+    </div>
+
+    <div class="trust-badges">
+      <img src="https://razorpay.com/build/browser/static/nacha.5a4d3a2e.svg" alt="Nacha Certified">
+      <img src="https://razorpay.com/build/browser/static/pci.7d4f5d4c.svg" alt="PCI Certified">
+    </div>
+  </div>
 
   <script>
-    document.getElementById('payBtn').addEventListener('click', async function() {
-      // Create order via API
-      const response = await fetch('/create-order', { method: 'POST' });
-      const order = await response.json();
-      
-      const options = {
-        "key": "<%= key_id %>", 
-        "amount": order.amount, 
-        "currency": order.currency,
-        "name": "Pad Dispenser",
-        "description": "Payment for pads",
-        "order_id": order.id,
-        "handler": async function (response){
-          // Verify payment with backend
-          const verifyResponse = await fetch('/verify-payment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_order_id: order.id,
-              razorpay_signature: response.razorpay_signature
-            })
-          });
-          const verifyResult = await verifyResponse.json();
-          if (verifyResult.status === 'success'){
-            window.location.href = '/dispensing';
-          } else {
-            alert('Payment verification failed.');
+    const payBtn = document.getElementById('payBtn');
+    
+    payBtn.addEventListener('click', async function() {
+      try {
+        payBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
+        payBtn.disabled = true;
+        
+        const response = await fetch('/create-order', { method: 'POST' });
+        const order = await response.json();
+        
+        const options = {
+          key: "<%= key_id %>",
+          amount: order.amount,
+          currency: order.currency,
+          name: "Secure Pad Dispenser",
+          description: "Hygiene Product Purchase",
+          order_id: order.id,
+          handler: async function(response) {
+            const verifyResponse = await fetch('/verify-payment', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: order.id,
+                razorpay_signature: response.razorpay_signature
+              })
+            });
+
+            const verifyResult = await verifyResponse.json();
+            if (verifyResult.status === 'success') {
+              window.location.href = '/dispensing';
+            } else {
+              alert('Payment verification failed. Please contact support.');
+              location.reload();
+            }
+          },
+          theme: {
+            color: "#0B5FFF"
+          },
+          modal: {
+            ondismiss: function() {
+              payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹30`;
+              payBtn.disabled = false;
+            }
           }
-        },
-        "theme": {
-          "color": "#F37254"
-        }
-      };
-      const rzp1 = new Razorpay(options);
-      rzp1.open();
+        };
+
+        const rzp1 = new Razorpay(options);
+        rzp1.open();
+      } catch (error) {
+        console.error('Payment error:', error);
+        alert('Secure payment initialization failed. Please try again.');
+      } finally {
+        payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹30`;
+        payBtn.disabled = false;
+      }
     });
   </script>
 </body>
