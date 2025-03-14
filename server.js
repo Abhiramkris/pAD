@@ -506,6 +506,24 @@ app.get('/display', async (req, res) => {
   });
 });
 
+// New Route: /currentpaymentid
+app.get('/currentpaymentid', async (req, res) => {
+  const authCodeParam = req.query.authCode;
+  if (authCodeParam !== process.env.AUTH_CODE) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  // If the transaction is completed and dispensing is false,
+  // reset currentPaymentId to null.
+  if (systemState.transactionCompleted && !systemState.dispensing) {
+    systemState.currentPaymentId = null;
+    // Optionally, log this event for debugging
+    await addLog('currentpaymentid', 'Transaction completed and dispensing false. currentPaymentId reset to null.');
+  }
+  
+  res.json({ currentPaymentId: systemState.currentPaymentId });
+});
+
 
 // Endpoint to send a custom email to the admin
 app.post('/send-custom-email', async (req, res) => {
