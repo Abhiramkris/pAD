@@ -163,6 +163,8 @@
       <span>Pay Securely - ₹5.30</span>
     </button>
 
+    
+
     <div class="security-info">
       <div class="security-item">
         <i class="fas fa-shield-check"></i>
@@ -186,7 +188,77 @@
 
   <script>
     const payBtn = document.getElementById('payBtn');
+    const padCountElement = document.getElementById('padCount');
+
+// Convert pad count text to a number
+const padCount = parseInt(padCountElement.textContent, 10);
+
+// Disable button if no pads are available
+if (padCount === 0) {
+  payBtn.disabled = true;
+  payBtn.style.background = "#888"; // Greyed-out appearance
+  payBtn.style.cursor = "not-allowed";
+  payBtn.innerHTML = `<i class="fas fa-ban"></i> Out of Stock`;
+}
+
+payBtn.addEventListener('click', async function() {
+  if (padCount === 0) return; // Prevents execution if disabled
+  
+  try {
+    payBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
+    payBtn.disabled = true;
     
+    const response = await fetch('/create-order', { method: 'POST' });
+    const order = await response.json();
+    
+    const options = {
+      key: "<%= key_id %>",
+      amount: order.amount,
+      currency: order.currency,
+      name: "Secure Pad Dispenser",
+      description: "Hygiene Product Purchase",
+      order_id: order.id,
+      handler: async function(response) {
+        const verifyResponse = await fetch('/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            razorpay_payment_id: response.razorpay_payment_id,
+            razorpay_order_id: order.id,
+            razorpay_signature: response.razorpay_signature
+          })
+        });
+
+        const verifyResult = await verifyResponse.json();
+        if (verifyResult.status === 'success') {
+          window.location.href = '/dispensing';
+        } else {
+          alert('Payment verification failed. Please contact support.');
+          location.reload();
+        }
+      },
+      theme: {
+        color: "#0B5FFF"
+      },
+      modal: {
+        ondismiss: function() {
+          payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
+          payBtn.disabled = false;
+        }
+      }
+    };
+
+    const rzp1 = new Razorpay(options);
+    rzp1.open();
+  } catch (error) {
+    console.error('Payment error:', error);
+    alert('Secure payment initialization failed. Please try again.');
+  } finally {
+    payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
+    payBtn.disabled = false;
+  }
+});
+
     payBtn.addEventListener('click', async function() {
       try {
         payBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
