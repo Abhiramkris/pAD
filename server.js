@@ -172,8 +172,13 @@ app.post('/admin/state', adminAuth, async (req, res) => {
       await addLog('state', 'System reset to default state');
     } else if (action === 'switch_off') {
       systemState.paymentStatus = 'inactive';
-      systemState.inactiveSince = Date.now();
-      await pool.execute('UPDATE system_state SET payment_status = ?, inactive_since = ? WHERE id = 1', ['inactive', systemState.inactiveSince]);
+      // Convert timestamp to MySQL datetime format
+      const inactiveDate = new Date(Date.now()).toISOString().slice(0, 19).replace('T', ' ');
+      
+      await pool.execute(
+        'UPDATE system_state SET payment_status = ?, inactive_since = ? WHERE id = 1', 
+        ['inactive', inactiveDate]
+      );
       await addLog('state', 'System switched off');
     } else if (action === 'switch_on') {
       systemState.paymentStatus = 'ready';
@@ -309,19 +314,7 @@ app.get('/check-motor', (req, res) => {
   }
 });
 
-// IR Sensor Interrupt (triggered when a pad is dispensed)
-app.post('/sensor-interrupt', async (req, res) => {
-  const { sensorTriggered } = req.body;
-  if (sensorTriggered && systemState.padCount > 0) {
-    systemState.padCount = Math.max(0, systemState.padCount - 1);
-    await updateSystemState();
-    await addLog('sensor', `Pad dispensed. New pad count: ${systemState.padCount}`);
-    res.json({ success: true, padCount: systemState.padCount });
-  } else {
-    await addLog('error', 'Sensor interrupt error: Invalid sensor data or no pads left');
-    res.status(400).json({ error: 'Invalid sensor data or no pads left' });
-  }
-});
+  
 
 // Refund Endpoint – Only allowed if payment is successful and transaction completed
 app.post('/refund', async (req, res) => {
