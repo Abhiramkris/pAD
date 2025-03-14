@@ -197,13 +197,17 @@ app.post('/admin/state', adminAuth, async (req, res) => {
 // Admin: Update Pad Count
 app.post('/update-pad-count', adminAuth, async (req, res) => {
   const { count } = req.body;
-  if (typeof count === 'number' && count >= 0) {
-    systemState.padCount = count;
-    await pool.execute('UPDATE system_state SET pad_count = ? WHERE id = 1', [count]);
-    await addLog('state', `Pad count updated to ${count}`);
+  
+  // Convert to number and validate
+  const numericCount = Number(count);
+  
+  if (!isNaN(numericCount) && numericCount >= 0) {
+    systemState.padCount = numericCount;
+    await pool.execute('UPDATE system_state SET pad_count = ? WHERE id = 1', [numericCount]);
+    await addLog('state', `Pad count updated to ${numericCount}`);
     res.json({ success: true, padCount: systemState.padCount });
   } else {
-    res.status(400).json({ error: 'Invalid pad count value' });
+    res.status(400).json({ error: 'Invalid pad count value - must be a non-negative number' });
   }
 });
 
@@ -314,7 +318,7 @@ app.get('/check-motor', (req, res) => {
   }
 });
 
-  
+
 
 // Refund Endpoint – Only allowed if payment is successful and transaction completed
 app.post('/refund', async (req, res) => {
