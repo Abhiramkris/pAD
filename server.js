@@ -506,6 +506,34 @@ app.get('/display', async (req, res) => {
   });
 });
 
+// Add this route to your server code to handle payment button state
+app.get('/payment-button-state', async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
+    const state = rows[0];
+    
+    // Payment button should be disabled if:
+    // 1. padCount is 0
+    // 2. payment_status is 'inactive'
+    // 3. dispensing is true (a transaction is in progress)
+    const disableButton = 
+      state.pad_count === 0 || 
+      state.payment_status === 'inactive' || 
+      state.dispensing === true;
+    
+    res.json({
+      disableButton: disableButton,
+      reason: state.pad_count === 0 ? 'Out of stock' : 
+              state.payment_status === 'inactive' ? 'System offline' : 
+              state.dispensing === true ? 'Transaction in progress' : ''
+    });
+  } catch (error) {
+    console.error('Error fetching payment button state:', error);
+    await addLog('error', `Payment button state error: ${error.message}`);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // New Route: /currentpaymentid
 app.get('/currentpaymentid', async (req, res) => {
   const authCodeParam = req.query.authCode;

@@ -3,6 +3,8 @@
 #include <Adafruit_SSD1306.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include "SPIFFS.h"  // Include SPIFFS for persistent storage
 
 // WiFi Credentials
 const char* ssid = "asdf";
@@ -13,19 +15,46 @@ const char* checkURL = "https://pad-ew3v.onrender.com/check";
 const char* displayURL = "https://pad-ew3v.onrender.com/display";
 const char* refundURL = "https://pad-ew3v.onrender.com/refund";
 const char* updatePaymentStatusURL = "https://pad-ew3v.onrender.com/update-payment-status";
+const char* currentPaymentRoute = "https://pad-ew3v.onrender.com/currentpaymentid";  // New route
 const char* authCode = "your_secret_auth_code";
 const char* serverIP = "https://pad-ew3v.onrender.com";  // or any other server URL you want
 
 // Motor and IR sensor configuration for L298N
-const int motorPin1 = 23;  // Motor direction pin 1 (IN1)
-const int motorPin2 = 22;  // Motor direction pin 2 (IN2)
-const int motorEnablePin = 21;  // Motor enable pin (EN)
-const int irSensorPin = 15;  // Adjust the pin number based on your wiring
+const int motorPin1 = 23;      // Motor direction pin 1 (IN1)
+const int motorPin2 = 18;      // Motor direction pin 2 (IN2)
+const int motorEnablePin = 5;  // Motor enable pin (ENA)
+const int irSensorPin = 15;    // IR sensor pin (with INPUT_PULLUP)
 
+// Hall effect sensor configuration
+const int hallSensorPin = 4;                     // Digital output of the hall effect sensor
+volatile int hallTriggerCount = 0;               // Counts complete rotations (or sensor triggers)
+volatile unsigned long lastHallTriggerTime = 0;  // For debouncing
+const unsigned long hallDebounceDelay = 50;      // Debounce delay in milliseconds
+
+volatile unsigned long lastIrTriggerTime = 0;  // For IR debounce
+const unsigned long irDebounceDelay = 100;     // Debounce delay in ms
+
+// Timing and state variables for motor control
 unsigned long motorStartTime = 0;
-const unsigned long motorTimeout = 10000;  // 10 seconds timeout
+const unsigned long motorTimeout = 50000;  // Motor timeout in milliseconds
 bool motorStarted = false;
-bool irInterruptDetected = false;
+volatile bool irInterruptDetected = false;  // Changed to volatile
+
+// Flag to indicate that a payment status update is pending
+bool pendingPaymentUpdate = false;
+
+// Debug variables
+unsigned long lastDebugPrintTime = 0;
+const unsigned long debugPrintInterval = 1000;  // Print debug info every 1 second
+
+
+// Display state variables
+bool displayActive = false;
+unsigned long lastDisplayReset = 0;
+const unsigned long DISPLAY_RESET_INTERVAL = 3600000; // 1 hour in ms
+bool displayBusy = false;
+unsigned long lastDisplayUpdate = 0;
+const unsigned long DISPLAY_UPDATE_INTERVAL = 100; // Limit updates to prevent corruption
 
 // OLED Display Configuration
 #define SCREEN_WIDTH 128
@@ -35,8 +64,107 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 // LED Pin
 const int ledPin = 2;
 
-// Pad Count Variable
-int padCount = 0; // Variable to track pad count
+// Pad Count Variable (local, if needed)
+int padCount = 0;
+
+
+void initializeDisplay() {
+  Wire.begin();
+  Wire.setClock(100000); // Lower speed for stability
+  
+  // Scan I2C to find display
+  byte error, address;
+  Serial.println("Scanning I2C bus...");
+  for(address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+    if (error == 0) {
+      Serial.print("I2C device found at address 0x");
+      Serial.println(address, HEX);
+    }
+  }
+  
+  // Try to initialize with common addresses
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+      Serial.println("SSD1306 allocation failed!");
+      displayActive = false;
+      return;
+    }
+  }
+  
+  displayActive = true;
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("Display initialized");
+  display.display();
+  Serial.println("Display initialized successfully");
+  
+  lastDisplayReset = millis();
+}
+
+void resetDisplay() {
+  Serial.println("Performing full display reset");
+  
+  // Completely reinitialize I2C
+  Wire.end();
+  delay(100);
+  
+  // Reinitialize display
+  initializeDisplay();
+  
+  lastDisplayReset = millis();
+}
+
+
+bool updateDisplaySafe(int textSize, const String& line1, const String& line2 = "", const String& line3 = "") {
+  if (!displayActive) return false;
+  if (displayBusy) return false;
+  
+  // Limit display update frequency to prevent corruption
+  unsigned long currentTime = millis();
+  if (currentTime - lastDisplayUpdate < DISPLAY_UPDATE_INTERVAL) {
+    return false;
+  }
+  
+  displayBusy = true;
+  
+  // Use try-catch structure to prevent crashes from display errors
+  try {
+    display.clearDisplay();
+    display.setTextSize(textSize);
+    display.setTextColor(WHITE);
+    
+    // First line
+    display.setCursor(0, 0);
+    display.println(line1);
+    
+    // Optional second line
+    if (line2.length() > 0) {
+      display.setCursor(0, textSize * 10);
+      display.println(line2);
+    }
+    
+    // Optional third line
+    if (line3.length() > 0) {
+      display.setCursor(0, textSize * 20);
+      display.println(line3);
+    }
+    
+    display.display();
+    lastDisplayUpdate = currentTime;
+  } catch (...) {
+    Serial.println("Display update error occurred, attempting reset");
+    resetDisplay();
+    displayBusy = false;
+    return false;
+  }
+  
+  displayBusy = false;
+  return true;
+}
 
 // Function Declarations
 void fetchCheckStatus();
@@ -45,24 +173,62 @@ void sendSystemError();
 void startMotor();
 void stopMotor();
 void updatePaymentStatus();
+void processPendingPaymentUpdate();
 void startRefundProcess(const String& paymentId, const String& reason);
 void updatePadCount();
+String getCurrentPaymentId();
+void checkDisplayHealth();
 
-// Sensor Interrupt
-void IRAM_ATTR sensorInterrupt() {
-  irInterruptDetected = true;  // Set the flag when the IR sensor is triggered
-  padCount++; // Increment pad count on IR sensor interruption
-  Serial.println("IR sensor triggered! Pad dispensed.");
+
+// Periodic display health check
+void checkDisplayHealth() {
+  unsigned long currentTime = millis();
+  
+  // Periodic full reset to avoid corruption
+  if (currentTime - lastDisplayReset > DISPLAY_RESET_INTERVAL) {
+    Serial.println("Performing scheduled display reset");
+    resetDisplay();
+  }
+}
+// Complete display reset function
+
+
+// IR Sensor Interrupt ISR (for pad dispensing) with debounce logic
+void IRAM_ATTR irSensorISR() {
+  irInterruptDetected = true;
+  // unsigned long currentTime = millis();
+  //  if (currentTime - lastIrTriggerTime > irDebounceDelay) {
+  // Add this line to print the IR sensor state immediately after trigger
+  // Note: Serial.println in ISR is not ideal practice but can help debug
+  // Serial.println("IR SENSOR TRIGGERED IN ISR!");
+
+  // irInterruptDetected = true;  // Set the flag when the IR sensor is triggered
+  // padCount++; // Increment pad count on IR sensor interruption
+  // lastIrTriggerTime = currentTime;
+  // }
+}
+
+// Hall Effect Sensor ISR (for rotation detection)
+void IRAM_ATTR hallSensorISR() {
+  unsigned long currentTime = millis();
+  if (currentTime - lastHallTriggerTime > hallDebounceDelay) {
+    hallTriggerCount++;
+    lastHallTriggerTime = currentTime;
+  }
 }
 
 void startMotor() {
   if (!motorStarted) {  // Ensure motor only starts if not already running
     motorStarted = true;
-    motorStartTime = millis();  // Start the motor and record the time
-    digitalWrite(motorPin1, HIGH);  // Set direction pin 1
-    digitalWrite(motorPin2, LOW);   // Set direction pin 2
+    motorStartTime = millis();           // Record motor start time
+    digitalWrite(motorPin1, HIGH);       // Set motor direction pin 1
+    digitalWrite(motorPin2, LOW);        // Set motor direction pin 2
     digitalWrite(motorEnablePin, HIGH);  // Enable motor
     Serial.println("Motor started.");
+
+    // Reset flags when motor starts
+    irInterruptDetected = false;
+    hallTriggerCount = 0;
   }
 }
 
@@ -70,25 +236,48 @@ void stopMotor() {
   digitalWrite(motorEnablePin, LOW);  // Disable motor
   motorStarted = false;
   Serial.println("Motor stopped.");
-  updatePaymentStatus();  // Update payment status when the motor stops
+  // Update payment status and ensure dispensing is false.
+  updatePaymentStatus();
 }
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);  // Give serial port time to initialize
+  Serial.println("\n\n========== SYSTEM STARTING ==========");
+
+  // Initialize SPIFFS for persistent storage
+  if (!SPIFFS.begin(true)) {
+    Serial.println("SPIFFS Mount Failed");
+    return;
+  }
+
+  // Set pin modes for motor and sensors
   pinMode(ledPin, OUTPUT);
   pinMode(motorPin1, OUTPUT);
   pinMode(motorPin2, OUTPUT);
   pinMode(motorEnablePin, OUTPUT);
   pinMode(irSensorPin, INPUT_PULLUP);
+  pinMode(hallSensorPin, INPUT_PULLUP);  // Using internal pull-up for hall sensor
 
-  // Attach the interrupt to the IR sensor
-  attachInterrupt(digitalPinToInterrupt(irSensorPin), sensorInterrupt, FALLING);
+  // Debug: Print initial state of IR sensor
+  Serial.print("Initial IR sensor state: ");
+  Serial.println(digitalRead(irSensorPin) == HIGH ? "HIGH (not triggered)" : "LOW (triggered)");
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+  // Ensure motor is off at startup
+  digitalWrite(motorPin1, LOW);
+  digitalWrite(motorPin2, LOW);
+  digitalWrite(motorEnablePin, LOW);
+
+  // Attach interrupts
+  attachInterrupt(digitalPinToInterrupt(irSensorPin), irSensorISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(hallSensorPin), hallSensorISR, RISING);
+
+  // Initialize OLED display
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  // Adjust address if needed
     Serial.println("SSD1306 allocation failed!");
-    for (;;);
+    for (;;)
+      ;
   }
-
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -96,6 +285,7 @@ void setup() {
   display.println("Initializing...");
   display.display();
 
+  // Connect to WiFi
   WiFi.begin(ssid, password);
   display.println("Connecting to WiFi...");
   display.display();
@@ -109,46 +299,141 @@ void setup() {
   display.display();
 }
 
+String getCurrentPaymentId() {
+  HTTPClient http;
+  String url = String(currentPaymentRoute) + "?authCode=" + authCode;
+  http.begin(url);
+  int httpResponseCode = http.GET();
+  String paymentId = "";
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    DynamicJsonDocument doc(256);
+    DeserializationError error = deserializeJson(doc, response);
+    if (!error) {
+      paymentId = doc["currentPaymentId"].as<String>();
+      Serial.println("Current Payment ID: " + paymentId);
+    } else {
+      Serial.print("JSON parse error in getCurrentPaymentId: ");
+      Serial.println(error.c_str());
+    }
+  } else {
+    Serial.print("Error fetching current payment id. HTTP code: ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
+  return paymentId;
+}
+
+// New function to stop the motor without updating payment status
+void stopMotorForRefund() {
+  digitalWrite(motorEnablePin, LOW);  // Disable motor
+  motorStarted = false;
+  Serial.println("Motor stopped for refund.");
+  // Note: Do not call updatePaymentStatus() here so that currentPaymentId remains intact
+}
+
 void loop() {
-  // If motor is running, check for timeout and IR interrupt
+  unsigned long currentTime = millis();
+
+  // Debug print
+  if (currentTime - lastDebugPrintTime > debugPrintInterval) {
+    Serial.println("\n--- DEBUG INFO ---");
+    Serial.print("IR Sensor State: ");
+    Serial.println(digitalRead(irSensorPin) == HIGH ? "HIGH (not triggered)" : "LOW (triggered)");
+    Serial.print("irInterruptDetected flag: ");
+    Serial.println(irInterruptDetected ? "TRUE" : "FALSE");
+    Serial.print("Motor State: ");
+    Serial.println(motorStarted ? "RUNNING" : "STOPPED");
+    Serial.print("Hall Trigger Count: ");
+    Serial.println(hallTriggerCount);
+    Serial.println("----------------\n");
+
+    lastDebugPrintTime = currentTime;
+  }
+
+  // Check WiFi status and process pending DB update if available
+  if (WiFi.status() == WL_CONNECTED) {
+    if (pendingPaymentUpdate) {
+      processPendingPaymentUpdate();
+    }
+  } else {
+    Serial.println("WiFi not connected. Cannot process pending updates.");
+  }
+
+  // Motor and Sensor Logic:
   if (motorStarted) {
-    unsigned long currentTime = millis();
-    if (currentTime - motorStartTime >= motorTimeout && !irInterruptDetected) {
-      // If no IR interrupt after 10 seconds, stop motor and initiate refund
-      Serial.println("No IR interrupt detected within 10 seconds. Stopping motor and initiating refund.");
-      stopMotor();  // Stop motor
-      startRefundProcess("some_payment_id", "Payment timeout, no IR sensor interrupt.");  // Start refund process
+    // Check for overall motor timeout (regardless of sensor triggers)
+    if (currentTime - motorStartTime >= motorTimeout) {
+      Serial.println("Motor timeout reached. Initiating refund.");
+      // Fetch current payment ID BEFORE stopping motor.
+      String currentPaymentId = getCurrentPaymentId();
+      if (currentPaymentId != "") {
+        stopMotorForRefund();
+        startRefundProcess(currentPaymentId, "Motor timeout reached before proper sensor detection.");
+      } else {
+        Serial.println("No valid payment ID available for refund.");
+      }
+      hallTriggerCount = 0;
+      irInterruptDetected = false;
+    }
+
+    // Check if hall effect sensor has detected 3 rotations
+    if (hallTriggerCount >= 3) {
+      Serial.println("3 hall sensor triggers detected!");
+      if (!irInterruptDetected) {
+        Serial.println("No IR sensor interrupt detected after 3 rotations. Initiating refund.");
+        String currentPaymentId = getCurrentPaymentId();
+        if (currentPaymentId != "") {
+          stopMotorForRefund();
+          startRefundProcess(currentPaymentId, "No IR sensor interrupt detected after 3 hall sensor rotations.");
+        } else {
+          Serial.println("No valid payment ID available for refund.");
+        }
+      } else {
+        Serial.println("Hall sensor and IR sensor both indicate successful dispense. Stopping motor.");
+        stopMotor();  // In normal dispense, use stopMotor() (which calls updatePaymentStatus())
+      }
+      hallTriggerCount = 0;
+      irInterruptDetected = false;
     }
   }
 
-  // If IR sensor is triggered, stop motor and reset interrupt flag
-  if (irInterruptDetected) {
-    Serial.println("IR sensor triggered. Stopping motor.");
-    stopMotor();  // Stop motor
-    irInterruptDetected = false;  // Reset interrupt flag
-    updatePaymentStatus();  // Update payment status
+  // IMPORTANT: This is where the issue might be happening
+  // The motor is stopping if IR sensor is triggered regardless of Hall sensor count
+  if (irInterruptDetected && motorStarted) {
+    Serial.println("IR sensor triggered while motor running. Stopping motor.");
+    Serial.print("Current Hall Trigger Count: ");
+    Serial.println(hallTriggerCount);
+    stopMotor();                  // This might be stopping the motor too early
+    irInterruptDetected = false;  // Reset IR sensor flag
+    hallTriggerCount = 0;         // Reset hall sensor counter
   }
 
-  // Fetch and display data
+  // Fetch and display data from server if WiFi is connected
   if (WiFi.status() == WL_CONNECTED) {
     fetchCheckStatus();
     fetchAndDisplayData();
   } else {
     Serial.println("WiFi not connected!");
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setCursor(0, 0);
+    display.println("WiFi not connected!");
+    display.display();
   }
 
-  delay(5000);  // Poll every 5 seconds
+  delay(100);  // Poll every 0.3 seconds
 }
+
 
 void fetchCheckStatus() {
   HTTPClient http;
   String fullURL = String(checkURL) + "?authCode=" + authCode;
   http.begin(fullURL);
-
   int httpResponseCode = http.GET();
   if (httpResponseCode == 200) {
     String payload = http.getString();
-    Serial.println("System Status from /check: " + payload);
+    // Serial.println("System Status from /check: " + payload);
     if (payload.indexOf("\"systemStatus\":\"active\"") > -1) {
       digitalWrite(ledPin, HIGH);
     } else {
@@ -158,46 +443,149 @@ void fetchCheckStatus() {
     Serial.println("Error fetching /check status: " + String(httpResponseCode));
     digitalWrite(ledPin, LOW);
   }
-
   http.end();
 }
 
+// Improved function to replace fetchAndDisplayData
 void fetchAndDisplayData() {
   HTTPClient http;
   String fullURL = String(displayURL) + "?authCode=" + authCode;
   http.begin(fullURL);
-
   int httpResponseCode = http.GET();
+  
   if (httpResponseCode == 200) {
     String payload = http.getString();
-    Serial.println("Display Data from /display: " + payload);
+    
+    // Parse JSON response using ArduinoJson
+    DynamicJsonDocument doc(256);
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) {
+      Serial.print("JSON parse error: ");
+      Serial.println(error.c_str());
+      updateDisplaySafe(1, "JSON Error", error.c_str());
+      http.end();
+      return;
+    }
+    
+    int serverPadCount = doc["padCount"];
+    bool dispensing = doc["dispensing"];
+    String paymentStatus = doc["paymentStatus"];
+    String systemStatus = doc["systemStatus"];
 
-    // Parse the response to check for "dispensing"
-    if (payload.indexOf("\"dispensing\":false") > -1) {
-      if (motorStarted) {
-        Serial.println("Dispensing is false. Stopping motor...");
-        stopMotor();
+    // Debug print
+    Serial.println("Server state - Dispensing: " + String(dispensing ? "true" : "false") + 
+                  ", Payment: " + paymentStatus + 
+                  ", System: " + systemStatus);
+
+    if (dispensing) {
+      // Show special message if dispensing
+      updateDisplaySafe(2, "cooking", "pads", "nice!");
+    } else {
+      // Alternating messages
+      static unsigned long lastDisplayChange = 0;
+      static bool showSpecialMessage = false;
+      unsigned long currentTime = millis();
+      const unsigned long messageDuration = 1300;  // special message duration
+      const unsigned long statusDuration = 5000;   // status display duration
+
+      if (currentTime - lastDisplayChange > (showSpecialMessage ? messageDuration : statusDuration)) {
+        showSpecialMessage = !showSpecialMessage;
+        lastDisplayChange = currentTime;
       }
-    } else if (payload.indexOf("\"dispensing\":true") > -1) {
-      if (!motorStarted) {
-        Serial.println("Dispensing is true. Starting motor...");
-        startMotor();
+
+      if (showSpecialMessage) {
+        updateDisplaySafe(2, "Happy", "Women's", "Day!");
+      } else {
+        String padCountStr = String(serverPadCount);
+        updateDisplaySafe(2, padCountStr + " Pads", "Status: " + paymentStatus, 
+                         "System: " + systemStatus);
       }
     }
 
-    // Display the data on the OLED screen
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println(payload);
-    display.display();
+    // Motor control logic based on dispensing value from the server
+    if (dispensing && !motorStarted) {
+      Serial.println("Dispensing is true. Starting motor...");
+      startMotor();
+    } else if (!dispensing && motorStarted) {
+      Serial.println("Dispensing is false. Stopping motor...");
+      stopMotor();
+    }
   } else {
     Serial.println("Error fetching /display: " + String(httpResponseCode));
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("Error fetching data!");
-    display.display();
+    updateDisplaySafe(1, "Error fetching", "data!", String(httpResponseCode));
+  }
+  
+  http.end();
+}
+
+// Function to process pending payment status update from persistent storage
+void processPendingPaymentUpdate() {
+  File file = SPIFFS.open("/pendingPaymentUpdate.json", FILE_READ);
+  if (!file) {
+    Serial.println("No pending payment update file found.");
+    pendingPaymentUpdate = false;
+    return;
+  }
+  String jsonPayload = file.readString();
+  file.close();
+
+  HTTPClient http;
+  String url = String(updatePaymentStatusURL) + "?authCode=" + authCode;
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.POST(jsonPayload);
+  if (httpResponseCode == 200) {
+    Serial.println("Pending payment status updated successfully.");
+    SPIFFS.remove("/pendingPaymentUpdate.json");
+    pendingPaymentUpdate = false;
+  } else {
+    Serial.print("Failed to update pending payment status. HTTP code: ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
+}
+
+// Update payment status function with retry logic using persistent storage
+void updatePaymentStatus() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected. Saving payment status update locally.");
+    // Save the update payload to SPIFFS for later processing
+    String payload = "{\"paymentStatus\":\"ready\", \"authCode\":\"" + String(authCode) + "\"}";
+    File file = SPIFFS.open("/pendingPaymentUpdate.json", FILE_WRITE);
+    if (file) {
+      file.print(payload);
+      file.close();
+      pendingPaymentUpdate = true;
+    } else {
+      Serial.println("Error writing pending update to storage.");
+    }
+    return;
   }
 
+  HTTPClient http;
+  String url = String(updatePaymentStatusURL) + "?authCode=" + authCode;
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  String jsonPayload = "{\"paymentStatus\":\"ready\", \"authCode\":\"" + String(authCode) + "\"}";
+  int httpResponseCode = http.POST(jsonPayload);
+
+  if (httpResponseCode == 200) {
+    Serial.println("Payment status updated to ready successfully.");
+  } else {
+    Serial.print("Failed to update payment status. HTTP response code: ");
+    Serial.println(httpResponseCode);
+    // Save the update payload for retry later
+    File file = SPIFFS.open("/pendingPaymentUpdate.json", FILE_WRITE);
+    if (file) {
+      file.print(jsonPayload);
+      file.close();
+      pendingPaymentUpdate = true;
+    } else {
+      Serial.println("Error writing pending update to storage.");
+    }
+  }
   http.end();
 }
 
@@ -208,48 +596,40 @@ void startRefundProcess(const String& paymentId, const String& reason) {
   http.begin(refundURL);
   http.addHeader("Content-Type", "application/json");
 
-  // Prepare JSON payload
   String postData = "{\"paymentId\":\"" + paymentId + "\", \"reason\":\"" + reason + "\"}";
-
   int httpResponseCode = http.POST(postData);
 
   if (httpResponseCode == 200) {
     Serial.println("Refund process initiated successfully.");
     String response = http.getString();
     Serial.println("Server response: " + response);
-    
-    // Update payment status to 'ready' after refund is processed
+
     updatePaymentStatus();
+    setDispensingStatus(false);  // Set dispensing to false after refund starts
   } else {
     Serial.println("Refund request failed!");
     String response = http.getString();
     Serial.println("Server response: " + response);
   }
-
   http.end();
 }
 
-
-void updatePaymentStatus() {
+void setDispensingStatus(bool status) {
   HTTPClient http;
-  String url = updatePaymentStatusURL;  // Replace with your server's IP or domain
-  http.begin(url);
+  String fullURL = String(displayURL) + "?authCode=" + authCode;
+  http.begin(fullURL);
   http.addHeader("Content-Type", "application/json");
 
-  // Make sure the authCode matches the one set on the server
-  String jsonPayload = "{\"paymentStatus\":\"ready\", \"authCode\":\"" + String(authCode) + "\"}";
-
-  // Send the POST request
-  int httpResponseCode = http.POST(jsonPayload);
+  String postData = "{\"dispensing\":" + String(status ? "true" : "false") + "}";
+  int httpResponseCode = http.POST(postData);
 
   if (httpResponseCode == 200) {
-    Serial.println("Payment status updated to ready successfully.");
+    Serial.println("Dispensing status updated successfully.");
   } else {
-    Serial.println("Failed to update payment status. HTTP response code: " + String(httpResponseCode));
+    Serial.println("Failed to update dispensing status. HTTP response code: " + String(httpResponseCode));
     String response = http.getString();
     Serial.println("Server response: " + response);
   }
-
   http.end();
 }
 
@@ -259,7 +639,6 @@ void sendSystemError() {
   http.begin(fullURL);
 
   String postData = "{\"reason\":\"IR interrupt not detected\"}";
-
   http.addHeader("Content-Type", "application/json");
 
   int httpResponseCode = http.POST(postData);
@@ -268,104 +647,5 @@ void sendSystemError() {
   } else {
     Serial.println("Failed to report system error to server.");
   }
-
   http.end();
 }
-
-
-
-db connection 
-admin login 
-admin logs 
-admin payments 
-admin switch on off reset the state 
-
-
-#esp32 
-email function 
-display function 
-log function 
-payment function 
-refund fuinction 
-start motor function 
-ir trigger function 
-hall effect sensor funtion 
-
-
-
--- Drop the 'admins' table if it exists
-DROP TABLE IF EXISTS `admins`;
-
--- Create the 'admins' table
-CREATE TABLE `admins` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `username` VARCHAR(50) NOT NULL,
-  `hashed_password` VARCHAR(255) NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Insert data into the 'admins' table
-INSERT INTO `admins` (`id`, `username`, `hashed_password`) VALUES
-(1, 'admin', '$2a$12$SVpAAfnI2qu0VMNbUYtmv.uGp4WLBV4b4WirQkmpYCeUmEvufATqS');
-
--- Drop the 'logs' table if it exists
-DROP TABLE IF EXISTS `logs`;
-
--- Create the 'logs' table
-CREATE TABLE `logs` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `type` VARCHAR(50) DEFAULT NULL,
-  `message` TEXT DEFAULT NULL,
-  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Insert data into the 'logs' table
-INSERT INTO `logs` (`id`, `type`, `message`, `created_at`) VALUES
-(1, 'payment', 'Payment verified: pay_Pw40U2CtLllXlO', '2025-02-15 17:10:18'),
-(2, 'admin', 'Admin admin logged in', '2025-02-15 17:17:44'),
-(3, 'state', 'System reset to default state', '2025-02-15 17:17:49'),
-(4, 'state', 'System switched off', '2025-02-15 17:18:03'),
-(5, 'state', 'System switched on', '2025-02-15 17:18:52'),
-(6, 'state', 'System switched off', '2025-02-15 17:21:04'),
-(7, 'state', 'System switched on', '2025-02-15 17:21:22'),
-(8, 'admin', 'Admin admin logged in', '2025-02-16 06:24:20');
-
--- Drop the 'payments' table if it exists
-DROP TABLE IF EXISTS `payments`;
-
--- Create the 'payments' table
-CREATE TABLE `payments` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `order_id` VARCHAR(100) NOT NULL,
-  `payment_id` VARCHAR(100) DEFAULT NULL,
-  `amount` INT NOT NULL,
-  `status` VARCHAR(20) NOT NULL,
-  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `order_id` (`order_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Insert data into the 'payments' table
-INSERT INTO `payments` (`id`, `order_id`, `payment_id`, `amount`, `status`, `created_at`) VALUES
-(1, 'order_Pw3zeXlrkFy2mi', 'pay_Pw40U2CtLllXlO', 600, 'success', '2025-02-15 17:09:16'),
-(2, 'order_Pw4926vzAPNbhf', NULL, 600, 'pending', '2025-02-15 17:18:09');
-
--- Drop the 'system_state' table if it exists
-DROP TABLE IF EXISTS `system_state`;
-
--- Create the 'system_state' table
-CREATE TABLE `system_state` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `pad_count` INT NOT NULL,
-  `payment_status` VARCHAR(20) NOT NULL,
-  `dispensing` TINYINT(1) NOT NULL,
-  `transaction_completed` TINYINT(1) NOT NULL,
-  `last_updated` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `inactive_since` DATETIME DEFAULT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Insert data into the 'system_state' table
-INSERT INTO `system_state` (`id`, `pad_count`, `payment_status`, `dispensing`, `transaction_completed`, `last_updated`, `inactive_since`) VALUES
-(1, 20, 'ready', 0, 0, '2025-02-15 17:21:22', NULL);

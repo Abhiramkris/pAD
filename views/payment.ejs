@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="UTF-8">
   <title>Secure Pad Dispenser</title>
@@ -131,8 +132,15 @@
     }
 
     @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.02); }
+
+      0%,
+      100% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.02);
+      }
     }
 
     .processing {
@@ -140,6 +148,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="container">
     <div class="header">
@@ -158,12 +167,12 @@
       </div>
     </div>
 
-    <button class="payment-btn" id="payBtn">
-      <i class="fas fa-lock"></i>
-      <span>Pay Securely - ₹5.30</span>
-    </button>
+    <div class="payment-container">
+      <button id="pay-button" class="payment-button">Pay Now 5.30</button>
+      <div id="status-message" class="status-message" style="display: none;"></div>
+    </div>
 
-    
+
 
     <div class="security-info">
       <div class="security-item">
@@ -185,88 +194,88 @@
       <img src="https://razorpay.com/build/browser/static/pci.7d4f5d4c.svg" alt="PCI Certified">
     </div>
   </div>
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const payButton = document.getElementById('pay-button');
+    const statusMessage = document.getElementById('status-message');
+    
+    // Function to check payment button state
+    function checkPaymentButtonState() {
+      fetch('/payment-button-state')
+        .then(response => response.json())
+        .then(data => {
+          if (data.disableButton) {
+            payButton.disabled = true;
+            payButton.classList.add('disabled');
+            statusMessage.textContent = data.reason;
+            statusMessage.style.display = 'block';
+          } else {
+            payButton.disabled = false;
+            payButton.classList.remove('disabled');
+            statusMessage.style.display = 'none';
+          }
+        })
+        .catch(error => {
+          console.error('Error checking payment button state:', error);
+          // If we can't reach the server, assume system is offline
+          payButton.disabled = true;
+          payButton.classList.add('disabled');
+          statusMessage.textContent = 'System offline';
+          statusMessage.style.display = 'block';
+        });
+    }
+    
+    // Check immediately when page loads
+    checkPaymentButtonState();
+    
+    // Then check every 5 seconds
+    setInterval(checkPaymentButtonState, 5000);
+  });
+</script>
+
+<!-- Add this to your HTML where the payment button is -->
+
+
+<style>
+  .payment-button.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  .status-message {
+    color: #ff4444;
+    font-weight: bold;
+    margin-top: 10px;
+  }
+</style>
 
   <script>
     const payBtn = document.getElementById('payBtn');
     const padCountElement = document.getElementById('padCount');
 
-// Convert pad count text to a number
-const padCount = parseInt(padCountElement.textContent, 10);
+    // Convert pad count text to a number
+    const padCount = parseInt(padCountElement.textContent, 10);
 
-// Disable button if no pads are available
-if (padCount === 0) {
-  payBtn.disabled = true;
-  payBtn.style.background = "#888"; // Greyed-out appearance
-  payBtn.style.cursor = "not-allowed";
-  payBtn.innerHTML = `<i class="fas fa-ban"></i> Out of Stock`;
-}
-
-payBtn.addEventListener('click', async function() {
-  if (padCount === 0) return; // Prevents execution if disabled
-  
-  try {
-    payBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
-    payBtn.disabled = true;
-    
-    const response = await fetch('/create-order', { method: 'POST' });
-    const order = await response.json();
-    
-    const options = {
-      key: "<%= key_id %>",
-      amount: order.amount,
-      currency: order.currency,
-      name: "Secure Pad Dispenser",
-      description: "Hygiene Product Purchase",
-      order_id: order.id,
-      handler: async function(response) {
-        const verifyResponse = await fetch('/verify-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            razorpay_payment_id: response.razorpay_payment_id,
-            razorpay_order_id: order.id,
-            razorpay_signature: response.razorpay_signature
-          })
-        });
-
-        const verifyResult = await verifyResponse.json();
-        if (verifyResult.status === 'success') {
-          window.location.href = '/dispensing';
-        } else {
-          alert('Payment verification failed. Please contact support.');
-          location.reload();
-        }
-      },
-      theme: {
-        color: "#0B5FFF"
-      },
-      modal: {
-        ondismiss: function() {
-          payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
-          payBtn.disabled = false;
-        }
-      }
-    };
-
-    const rzp1 = new Razorpay(options);
-    rzp1.open();
-  } catch (error) {
-    console.error('Payment error:', error);
-    alert('Secure payment initialization failed. Please try again.');
-  } finally {
-    payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
-    payBtn.disabled = false;
-  }
-});
+    // Disable button if no pads are available
+    if (padCount === 0) {
+      payBtn.disabled = true;
+      payBtn.style.background = "#888"; // Greyed-out appearance
+      payBtn.style.cursor = "not-allowed";
+      payBtn.innerHTML = `<i class="fas fa-ban"></i> Out of Stock`;
+    }
 
     payBtn.addEventListener('click', async function() {
+      if (padCount === 0) return; // Prevents execution if disabled
+
       try {
         payBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
         payBtn.disabled = true;
-        
-        const response = await fetch('/create-order', { method: 'POST' });
+
+        const response = await fetch('/create-order', {
+          method: 'POST'
+        });
         const order = await response.json();
-        
+
         const options = {
           key: "<%= key_id %>",
           amount: order.amount,
@@ -277,7 +286,69 @@ payBtn.addEventListener('click', async function() {
           handler: async function(response) {
             const verifyResponse = await fetch('/verify-payment', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_order_id: order.id,
+                razorpay_signature: response.razorpay_signature
+              })
+            });
+
+            const verifyResult = await verifyResponse.json();
+            if (verifyResult.status === 'success') {
+              window.location.href = '/dispensing';
+            } else {
+              alert('Payment verification failed. Please contact support.');
+              location.reload();
+            }
+          },
+          theme: {
+            color: "#0B5FFF"
+          },
+          modal: {
+            ondismiss: function() {
+              payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
+              payBtn.disabled = false;
+            }
+          }
+        };
+
+        const rzp1 = new Razorpay(options);
+        rzp1.open();
+      } catch (error) {
+        console.error('Payment error:', error);
+        alert('Secure payment initialization failed. Please try again.');
+      } finally {
+        payBtn.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
+        payBtn.disabled = false;
+      }
+    });
+
+    payBtn.addEventListener('click', async function() {
+      try {
+        payBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
+        payBtn.disabled = true;
+
+        const response = await fetch('/create-order', {
+          method: 'POST'
+        });
+        const order = await response.json();
+
+        const options = {
+          key: "<%= key_id %>",
+          amount: order.amount,
+          currency: order.currency,
+          name: "Secure Pad Dispenser",
+          description: "Hygiene Product Purchase",
+          order_id: order.id,
+          handler: async function(response) {
+            const verifyResponse = await fetch('/verify-payment', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
               body: JSON.stringify({
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_order_id: order.id,
@@ -316,4 +387,5 @@ payBtn.addEventListener('click', async function() {
     });
   </script>
 </body>
+
 </html>
