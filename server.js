@@ -33,7 +33,6 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
-
 // Razorpay Setup
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -49,25 +48,89 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// In-memory state mirror (will be synced with DB)
-// Added inactiveSince to track when the system became inactive.
-// systemStatus is derived: if padCount > 0 then 'active' else 'inactive'.
+// In-memory state cache (will be synced with DB)
 let systemState = {
-  padCount: 20,
+  padCount: 0,
   currentOrderId: null,
   currentPaymentId: null,
-  paymentStatus: 'ready', // "ready", "success", "refunded", "inactive"
+  paymentStatus: 'ready',
   dispensing: false,
   transactionCompleted: false,
-  inactiveSince: null,  // timestamp when system became inactive
+  inactiveSince: null,
 };
 
-// Helper: Update system state in DB
-async function updateSystemState() {
+// Helper: Get the current system state from the database
+async function getSystemState() {
+  const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
+  if (rows.length === 0) {
+    // Create initial state if not found
+    await pool.execute(
+      'INSERT INTO system_state (id, pad_count, payment_status, dispensing, transaction_completed, inactive_since) VALUES (1, 20, "ready", false, false, NULL)'
+    );
+    return { 
+      pad_count: 20, 
+      payment_status: 'ready', 
+      dispensing: false, 
+      transaction_completed: false, 
+      inactive_since: null 
+    };
+  }
+  return rows[0];
+}
+
+// Helper: Update system state in DB and refresh the in-memory cache
+async function updateSystemState(updates = {}) {
+  // First, get the current state from the database
+  const currentState = await getSystemState();
+  
+  // Apply updates to the current state
+  const updatedState = { ...currentState, ...updates };
+  
+  // Update the database
   await pool.execute(
     'UPDATE system_state SET pad_count = ?, payment_status = ?, dispensing = ?, transaction_completed = ?, inactive_since = ? WHERE id = 1',
-    [systemState.padCount, systemState.paymentStatus, systemState.dispensing, systemState.transactionCompleted, systemState.inactiveSince]
+    [
+      updatedState.pad_count, 
+      updatedState.payment_status, 
+      updatedState.dispensing, 
+      updatedState.transaction_completed, 
+      updatedState.inactive_since
+    ]
   );
+  
+  // Update the in-memory cache
+  systemState = {
+    padCount: updatedState.pad_count,
+    paymentStatus: updatedState.payment_status,
+    dispensing: updatedState.dispensing,
+    transactionCompleted: updatedState.transaction_completed,
+    inactiveSince: updatedState.inactive_since,
+    currentOrderId: systemState.currentOrderId,
+    currentPaymentId: systemState.currentPaymentId
+  };
+  
+  return systemState;
+}
+
+// Helper: Refresh the in-memory state from the database
+async function refreshSystemState() {
+  const dbState = await getSystemState();
+  systemState = {
+    padCount: dbState.pad_count,
+    paymentStatus: dbState.payment_status,
+    dispensing: dbState.dispensing,
+    transactionCompleted: dbState.transaction_completed,
+    inactiveSince: dbState.inactive_since,
+    currentOrderId: systemState.currentOrderId,
+    currentPaymentId: systemState.currentPaymentId
+  };
+  return systemState;
+}
+
+// Initialize the system state when the application starts
+async function initializeSystemState() {
+  await refreshSystemState();
+  console.log('System state initialized:', systemState);
 }
 
 // Helper: Log events to DB
@@ -125,15 +188,9 @@ app.post('/admin/login', async (req, res) => {
 // Admin Dashboard
 app.get('/admin', adminAuth, async (req, res) => {
   try {
-    // Sync system state from DB
-    const [stateRows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
-    const dbState = stateRows[0];
-    systemState.padCount = dbState.pad_count;
-    systemState.paymentStatus = dbState.payment_status;
-    systemState.dispensing = dbState.dispensing;
-    systemState.transactionCompleted = dbState.transaction_completed;
-    systemState.inactiveSince = dbState.inactive_since;
-
+    // Refresh system state from DB
+    await refreshSystemState();
+    
     // Fetch logs and payments
     const [logRows] = await pool.execute('SELECT * FROM logs ORDER BY created_at DESC LIMIT 50');
     const [paymentRows] = await pool.execute('SELECT * FROM payments ORDER BY created_at DESC LIMIT 50');
@@ -156,37 +213,31 @@ app.post('/admin/state', adminAuth, async (req, res) => {
   const { action } = req.body; // action: 'reset', 'switch_on', 'switch_off'
   try {
     if (action === 'reset') {
-      systemState = {
-        padCount: 20,
-        currentOrderId: null,
-        currentPaymentId: null,
-        paymentStatus: 'ready',
+      await updateSystemState({
+        pad_count: 20,
+        payment_status: 'ready',
         dispensing: false,
-        transactionCompleted: false,
-        inactiveSince: null,
-      };
-      await pool.execute(
-        'UPDATE system_state SET pad_count = ?, payment_status = ?, dispensing = ?, transaction_completed = ?, inactive_since = ? WHERE id = 1',
-        [20, 'ready', false, false, null]
-      );
+        transaction_completed: false,
+        inactive_since: null
+      });
+      systemState.currentOrderId = null;
+      systemState.currentPaymentId = null;
       await addLog('state', 'System reset to default state');
     } else if (action === 'switch_off') {
-      systemState.paymentStatus = 'inactive';
-      // Convert timestamp to MySQL datetime format
       const inactiveDate = new Date(Date.now()).toISOString().slice(0, 19).replace('T', ' ');
-      
-      await pool.execute(
-        'UPDATE system_state SET payment_status = ?, inactive_since = ? WHERE id = 1', 
-        ['inactive', inactiveDate]
-      );
+      await updateSystemState({
+        payment_status: 'inactive',
+        inactive_since: inactiveDate
+      });
       await addLog('state', 'System switched off');
     } else if (action === 'switch_on') {
-      systemState.paymentStatus = 'ready';
-      systemState.inactiveSince = null;
-      await pool.execute('UPDATE system_state SET payment_status = ?, inactive_since = ? WHERE id = 1', ['ready', null]);
+      await updateSystemState({
+        payment_status: 'ready',
+        inactive_since: null
+      });
       await addLog('state', 'System switched on');
     }
-    res.json({ success: true, systemState });
+    res.json({ success: true, systemState: await refreshSystemState() });
   } catch (error) {
     console.error('Error updating system state:', error);
     await addLog('error', `State update error: ${error.message}`);
@@ -202,10 +253,9 @@ app.post('/update-pad-count', adminAuth, async (req, res) => {
   const numericCount = Number(count);
   
   if (!isNaN(numericCount) && numericCount >= 0) {
-    systemState.padCount = numericCount;
-    await pool.execute('UPDATE system_state SET pad_count = ? WHERE id = 1', [numericCount]);
+    await updateSystemState({ pad_count: numericCount });
     await addLog('state', `Pad count updated to ${numericCount}`);
-    res.json({ success: true, padCount: systemState.padCount });
+    res.json({ success: true, padCount: numericCount });
   } else {
     res.status(400).json({ error: 'Invalid pad count value - must be a non-negative number' });
   }
@@ -217,8 +267,7 @@ app.post('/update-pad-count', adminAuth, async (req, res) => {
 
 // Home Route: Redirect based on transaction status
 app.get('/', async (req, res) => {
-  const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
-  const state = rows[0];
+  const state = await getSystemState();
   if (state.transaction_completed && state.dispensing) {
     return res.redirect('/dispensing');
   }
@@ -227,8 +276,7 @@ app.get('/', async (req, res) => {
 
 // Payment Page
 app.get('/payment', async (req, res) => {
-  const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
-  const state = rows[0];
+  const state = await getSystemState();
   if (state.transaction_completed && state.dispensing) {
     return res.redirect('/dispensing');
   }
@@ -240,22 +288,13 @@ app.get('/payment', async (req, res) => {
 
 // Dispensing Page (shown when a transaction is complete)
 app.get('/dispensing', async (req, res) => {
-  let [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
-  let state = rows[0];
-  if (!state) {
-    // Create initial state if not found
-    await pool.execute(
-      'INSERT INTO system_state (id, pad_count, payment_status, dispensing, transaction_completed, inactive_since) VALUES (1, 20, "ready", false, false, NULL)'
-    );
-    state = { pad_count: 20, payment_status: 'ready', dispensing: false, transaction_completed: false, inactive_since: null };
-  }
+  const state = await getSystemState();
   if (state.transaction_completed && state.dispensing) {
     res.render('dispensing', { padCount: state.pad_count });
   } else {
     res.redirect('/payment');
   }
 });
-
 
 // -----------------------
 // PAYMENT PROCESSING
@@ -288,15 +327,19 @@ app.post('/verify-payment', async (req, res) => {
     .digest('hex');
 
   if (generated_signature === razorpay_signature) {
-    systemState.paymentStatus = 'success';
+    // Update system state
     systemState.currentPaymentId = razorpay_payment_id;
-    systemState.dispensing = true;
-    systemState.transactionCompleted = true;
+    await updateSystemState({
+      payment_status: 'success',
+      dispensing: true,
+      transaction_completed: true
+    });
+    
     await pool.execute(
       'UPDATE payments SET payment_id = ?, status = ? WHERE order_id = ?',
       [razorpay_payment_id, 'success', systemState.currentOrderId]
     );
-    await updateSystemState();
+    
     await addLog('payment', `Payment verified: ${razorpay_payment_id}`);
     res.json({ status: 'success' });
   } else {
@@ -306,19 +349,19 @@ app.post('/verify-payment', async (req, res) => {
 });
 
 // Check Motor Status (for hardware control)
-app.get('/check-motor', (req, res) => {
+app.get('/check-motor', async (req, res) => {
   const { authCode } = req.query;
   if (authCode !== process.env.AUTH_CODE) {
     return res.status(401).json({ status: 'unauthorized' });
   }
-  if (systemState.paymentStatus === 'success' && !systemState.dispensing) {
+  
+  const state = await getSystemState();
+  if (state.payment_status === 'success' && !state.dispensing) {
     res.json({ motor: 'start' });
   } else {
     res.json({ motor: 'stop' });
   }
 });
-
-
 
 // Refund Endpoint – Only allowed if payment is successful and transaction completed
 app.post('/refund', async (req, res) => {
@@ -329,24 +372,35 @@ app.post('/refund', async (req, res) => {
     return res.status(400).json({ error: 'Invalid Payment ID' });
   }
 
+  // Get current state
+  const currentState = await getSystemState();
+
   // Prevent duplicate refunds
-  if (systemState.paymentStatus === 'refunded' && systemState.currentPaymentId === paymentId) {
+  if (currentState.payment_status === 'refunded' && systemState.currentPaymentId === paymentId) {
     await addLog('error', `Refund error: Duplicate refund for Payment ID ${paymentId}`);
     return res.status(400).json({ error: 'Refund has already been processed for this payment.' });
   }
 
   try {
-    systemState.paymentStatus = 'refunded';
+    // Update state
     systemState.currentPaymentId = paymentId;
+    await updateSystemState({
+      payment_status: 'refunded'
+    });
 
     const refund = await razorpay.payments.refund(paymentId);
     console.log('Refund successful:', refund);
     await addLog('refund', `Refund processed for Payment ID: ${paymentId} with reason: ${reason}`);
 
+    // Re-fetch to get the latest state including inactiveSince
+    const updatedState = await getSystemState();
+    
     // Check inactivity: if system is inactive and inactiveSince is set for at least 30 mins.
-    if (systemState.paymentStatus === 'refunded' && systemState.inactiveSince) {
+    if (updatedState.payment_status === 'refunded' && updatedState.inactive_since) {
       const now = Date.now();
-      const inactiveDuration = now - systemState.inactiveSince;
+      const inactiveTime = new Date(updatedState.inactive_since).getTime();
+      const inactiveDuration = now - inactiveTime;
+      
       if (inactiveDuration >= 30 * 60 * 1000) {
         const mailOptions = {
           from: process.env.EMAIL_USER,
@@ -378,9 +432,11 @@ app.post('/refund', async (req, res) => {
 app.post('/system-error', async (req, res) => {
   const { paymentId, reason } = req.body;
   if (paymentId && reason === 'IR interrupt not detected') {
-    systemState.paymentStatus = 'refunded';
-    systemState.dispensing = false;
-    await updateSystemState();
+    await updateSystemState({
+      payment_status: 'refunded',
+      dispensing: false
+    });
+    
     try {
       const refund = await razorpay.payments.refund(paymentId);
       await addLog('refund', `Refund processed for system error for Payment ID: ${paymentId}`);
@@ -411,8 +467,6 @@ app.post('/system-error', async (req, res) => {
   }
 });
 
-
-
 // Update Payment Status Endpoint (for ESP32)
 app.post('/update-payment-status', async (req, res) => {
   const { paymentStatus, authCode } = req.body;
@@ -430,33 +484,37 @@ app.post('/update-payment-status', async (req, res) => {
   }
 
   try {
-    const previousStatus = systemState.paymentStatus;
+    // Get the current state directly from the database
+    const currentState = await getSystemState();
+    const previousStatus = currentState.payment_status;
+    
+    // Calculate the new pad count
+    let newPadCount = currentState.pad_count;
     
     // Only reduce count when transitioning from success->ready
     if (paymentStatus === 'ready' && previousStatus === 'success') {
-      systemState.padCount = Math.max(0, systemState.padCount - 1);
-      await addLog('inventory', `Pad dispensed. New count: ${systemState.padCount}`);
+      newPadCount = Math.max(0, currentState.pad_count - 1);
+      await addLog('inventory', `Pad dispensed. New count: ${newPadCount}`);
     }
 
-    // Update full system state
-    systemState.paymentStatus = paymentStatus;
+    // Update system state
+    await updateSystemState({
+      pad_count: newPadCount,
+      payment_status: paymentStatus,
+      dispensing: false,
+      transaction_completed: false
+    });
+
+    // Reset the transaction IDs in memory
     systemState.currentOrderId = null;
     systemState.currentPaymentId = null;
-    systemState.dispensing = false;
-    systemState.transactionCompleted = false;
 
-    // Update database
-    await pool.execute(
-      'UPDATE system_state SET pad_count = ?, payment_status = ?, dispensing = ?, transaction_completed = ? WHERE id = 1',
-      [systemState.padCount, paymentStatus, false, false]
-    );
-
-    await addLog('dispense', `Pad dispensed. New count: ${systemState.padCount}`);
+    await addLog('dispense', `Pad dispensed. New count: ${newPadCount}`);
     
     res.json({ 
       success: true, 
       newStatus: paymentStatus,
-      padCount: systemState.padCount
+      padCount: newPadCount
     });
   } catch (error) {
     console.error('Status update error:', error);
@@ -465,15 +523,13 @@ app.post('/update-payment-status', async (req, res) => {
   }
 });
 
-
 // Check System Status (for device monitoring)
 app.get('/check', async (req, res) => {
   const authCodeParam = req.query.authCode;
   if (authCodeParam !== process.env.AUTH_CODE) {
     return res.status(401).json({ status: 'unauthorized' });
   }
-  const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
-  const state = rows[0];
+  const state = await getSystemState();
   res.json({
     padCount: state.pad_count,
     paymentStatus: state.payment_status,
@@ -488,11 +544,9 @@ app.get('/display', async (req, res) => {
     return res.status(401).json({ status: 'unauthorized' });
   }
   
-  const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
-  const state = rows[0];
+  const state = await getSystemState();
   
   // Force "dispensing" to be true if payment is successful and the transaction is completed.
-  // This change is intended to signal the ESP32 to start the motor.
   let dispensing = false;
   if (state.payment_status === 'success' && state.transaction_completed) {
     dispensing = true;
@@ -509,8 +563,7 @@ app.get('/display', async (req, res) => {
 // Add this route to your server code to handle payment button state
 app.get('/payment-button-state', async (req, res) => {
   try {
-    const [rows] = await pool.execute('SELECT * FROM system_state WHERE id = 1');
-    const state = rows[0];
+    const state = await getSystemState();
     
     // Payment button should be disabled if:
     // 1. padCount is 0
@@ -541,9 +594,12 @@ app.get('/currentpaymentid', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   
+  // Get current state from database
+  const state = await getSystemState();
+  
   // If the transaction is completed and dispensing is false,
   // reset currentPaymentId to null.
-  if (systemState.transactionCompleted && !systemState.dispensing) {
+  if (state.transaction_completed && !state.dispensing) {
     systemState.currentPaymentId = null;
     // Optionally, log this event for debugging
     await addLog('currentpaymentid', 'Transaction completed and dispensing false. currentPaymentId reset to null.');
@@ -551,7 +607,6 @@ app.get('/currentpaymentid', async (req, res) => {
   
   res.json({ currentPaymentId: systemState.currentPaymentId });
 });
-
 
 // Endpoint to send a custom email to the admin
 app.post('/send-custom-email', async (req, res) => {
@@ -587,6 +642,10 @@ app.post('/send-custom-email', async (req, res) => {
   }
 });
 
+// Initialize the system when the server starts
+initializeSystemState().catch(error => {
+  console.error('Failed to initialize system state:', error);
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
