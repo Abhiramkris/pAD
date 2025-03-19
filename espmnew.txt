@@ -1,0 +1,473 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <FS.h>
+
+// WiFi Credentials
+const char* ssid = "asdff";
+const char* password = "";
+
+// Server URLs - store in flash memory to save RAM
+const char PROGMEM checkURL[] = "https://pad-ew3v.onrender.com/check";
+const char PROGMEM displayURL[] = "https://pad-ew3v.onrender.com/display";
+const char PROGMEM refundURL[] = "https://pad-ew3v.onrender.com/refund";
+const char PROGMEM updatePaymentStatusURL[] = "https://pad-ew3v.onrender.com/update-payment-status";
+const char PROGMEM currentPaymentRoute[] = "https://pad-ew3v.onrender.com/currentpaymentid";
+const char PROGMEM authCode[] = "your_secret_auth_code";
+
+// ESP8266 Pin Configuration (NodeMCU)
+#define MOTOR_PIN1 D1       // GPIO5
+#define MOTOR_PIN2 D2       // GPIO4
+#define MOTOR_ENABLE_PIN D3  // GPIO0
+#define IR_SENSOR_PIN D5     // GPIO14
+#define IR_SENSOR_ENABLE_PIN D6 // GPIO12
+#define LED_PIN D4          // GPIO2 (Built-in LED)
+
+// Timing variables
+volatile unsigned long lastIrTriggerTime = 0;
+unsigned long lastHttpRequestTime = 0;
+#define HTTP_REQUEST_INTERVAL 3000 // 3 seconds between HTTP requests
+
+// System state
+int padCount = 0;
+volatile bool irInterruptDetected = false;
+unsigned long motorStartTime = 0;
+#define MOTOR_TIMEOUT 50000 // 50 seconds
+bool motorStarted = false;
+
+// OLED Display
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// WiFi Client with increased timeout
+WiFiClientSecure client;
+
+// Forward declarations 
+void handleMotorOperation();
+void startMotor();
+void stopMotor();
+void handleIRSensorTrigger();
+void handleMotorTimeout();
+void resetMotorState();
+void handleWiFiReconnect();
+void printWiFiStatus();
+
+void printWiFiStatus() {
+  Serial.print("WiFi Status: ");
+  switch(WiFi.status()) {
+    case WL_CONNECTED: Serial.println("Connected"); break;
+    case WL_NO_SHIELD: Serial.println("No Shield"); break;
+    case WL_IDLE_STATUS: Serial.println("Idle"); break;
+    case WL_NO_SSID_AVAIL: Serial.println("No SSID Available"); break;
+    case WL_SCAN_COMPLETED: Serial.println("Scan Completed"); break;
+    case WL_CONNECT_FAILED: Serial.println("Connection Failed"); break;
+    case WL_CONNECTION_LOST: Serial.println("Connection Lost"); break;
+    case WL_DISCONNECTED: Serial.println("Disconnected"); break;
+    default: Serial.println("Unknown"); break;
+  }
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+WiFi.mode(WIFI_STA); // Set to station mode only
+
+void handleWiFiReconnect() {
+  static unsigned long lastReconnectAttempt = 0;
+  
+  if (millis() - lastReconnectAttempt > 10000) {
+    Serial.println(F("Reconnecting WiFi..."));
+    printWiFiStatus(); // Print current WiFi status
+    
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println(F("Reconnecting WiFi..."));
+    display.display();
+    
+    WiFi.disconnect();
+    delay(100);
+    WiFi.begin(ssid, password);
+    
+    // Wait a bit to see if connection succeeds
+    for(int i=0; i<20; i++) {
+      if(WiFi.status() == WL_CONNECTED) {
+        Serial.println("WiFi connected successfully!");
+        break;
+      }
+      delay(100);
+      Serial.print(".");
+    }
+    
+    printWiFiStatus(); // Print status after connection attempt
+    lastReconnectAttempt = millis();
+  }
+}
+
+
+// Extract non-ISR code to reduce IRAM usage
+void ICACHE_RAM_ATTR irSensorISR() {
+  if (millis() - lastIrTriggerTime > 100) {
+    irInterruptDetected = true;
+    lastIrTriggerTime = millis();
+  }
+}
+
+// Helper functions to read from flash
+String getFlashString(const char* flashStr) {
+  return String((const __FlashStringHelper*)flashStr);
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Initialize pins with direct port manipulation where possible
+  pinMode(MOTOR_PIN1, OUTPUT);
+  pinMode(MOTOR_PIN2, OUTPUT);
+  pinMode(MOTOR_ENABLE_PIN, OUTPUT);
+  pinMode(IR_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(IR_SENSOR_ENABLE_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  
+  digitalWrite(MOTOR_PIN1, LOW);
+  digitalWrite(MOTOR_PIN2, LOW);
+  analogWrite(MOTOR_ENABLE_PIN, 0);
+  digitalWrite(IR_SENSOR_ENABLE_PIN, LOW);
+  digitalWrite(LED_PIN, LOW);
+
+  // Attach interrupt for IR sensor
+  attachInterrupt(digitalPinToInterrupt(IR_SENSOR_PIN), irSensorISR, FALLING);
+
+  // Initialize display with minimal settings
+  Wire.begin(D2, D1); // SDA=D2 (GPIO4), SCL=D1 (GPIO5)
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("Display init failed!"));
+    for(int i=0; i<3; i++) {
+      digitalWrite(LED_PIN, HIGH);
+      delay(300);
+      digitalWrite(LED_PIN, LOW);
+      delay(300);
+    }
+  }
+  
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println(F("Connecting to WiFi..."));
+  display.display();
+
+  // Configure WiFiClientSecure
+  client.setInsecure();
+  client.setTimeout(5000); // 5 seconds timeout
+  
+
+  
+  int wifiRetry = 0;
+  while (WiFi.status() != WL_CONNECTED && wifiRetry < 20) {
+    delay(500);
+    Serial.print(F("."));
+    wifiRetry++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(F("\nWiFi connected!"));
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println(F("WiFi connected!"));
+    display.display();
+  } else {
+    Serial.println(F("\nWiFi connection failed!"));
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println(F("WiFi failed!"));
+    display.display();
+  }
+
+  // Initialize SPIFFS
+  SPIFFS.begin();
+}
+
+void loop() {
+  // Handle WiFi connection
+  if (WiFi.status() != WL_CONNECTED) {
+    handleWiFiReconnect();
+  }
+  
+  // Handle motor operation
+  handleMotorOperation();
+  
+  // Update display and check status at intervals
+  if (millis() - lastHttpRequestTime > HTTP_REQUEST_INTERVAL) {
+    if (WiFi.status() == WL_CONNECTED) {
+      fetchCheckStatus();
+      fetchAndDisplayData();
+    } else {
+      display.clearDisplay();
+      display.setTextSize(2);
+      display.setCursor(0, 0);
+      display.println(F("WiFi"));
+      display.println(F("Disconnected!"));
+      display.display();
+    }
+    lastHttpRequestTime = millis();
+  }
+  
+  yield(); // Allow the ESP8266 to handle WiFi and system tasks
+}
+
+void handleMotorOperation() {
+  if (motorStarted) {
+    // Check for timeout
+    if (millis() - motorStartTime > MOTOR_TIMEOUT) {
+      handleMotorTimeout();
+    }
+    
+    // Check if IR sensor was triggered
+    if (irInterruptDetected) {
+      handleIRSensorTrigger();
+    }
+  }
+}
+
+
+void fetchCheckStatus() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  
+  HTTPClient http;
+  http.begin(client, checkURL);
+  http.setTimeout(5000);
+  
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    digitalWrite(LED_PIN, payload.indexOf("active") != -1 ? HIGH : LOW);
+  }
+  http.end();
+}
+
+void fetchAndDisplayData() {
+  HTTPClient http;
+  String url = getFlashString(displayURL) + "?authCode=" + getFlashString(authCode);
+  
+  http.begin(client, url);
+  http.setTimeout(5000);
+  
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    
+    // Simple string parsing
+    bool dispensing = payload.indexOf("\"dispensing\":true") != -1;
+    
+    // Extract padCount
+    int padCountStart = payload.indexOf("\"padCount\":");
+    if (padCountStart != -1) {
+      padCountStart += 11;
+      int padCountEnd = payload.indexOf(",", padCountStart);
+      if (padCountEnd == -1) padCountEnd = payload.indexOf("}", padCountStart);
+      if (padCountEnd != -1) {
+        padCount = payload.substring(padCountStart, padCountEnd).toInt();
+      }
+    }
+    
+    // Extract payment status
+    String paymentStatus = "unknown";
+    int payStatusStart = payload.indexOf("\"paymentStatus\":\"");
+    if (payStatusStart != -1) {
+      payStatusStart += 17;
+      int payStatusEnd = payload.indexOf("\"", payStatusStart);
+      if (payStatusEnd != -1) {
+        paymentStatus = payload.substring(payStatusStart, payStatusEnd);
+      }
+    }
+    
+    // Extract system status
+    String systemStatus = "unknown";
+    int sysStatusStart = payload.indexOf("\"systemStatus\":\"");
+    if (sysStatusStart != -1) {
+      sysStatusStart += 16;
+      int sysStatusEnd = payload.indexOf("\"", sysStatusStart);
+      if (sysStatusEnd != -1) {
+        systemStatus = payload.substring(sysStatusStart, sysStatusEnd);
+      }
+    }
+    
+    // Update display
+    display.clearDisplay();
+    display.setTextColor(WHITE);
+    
+    if (dispensing) {
+      digitalWrite(IR_SENSOR_ENABLE_PIN, HIGH);
+      display.setTextSize(2);
+      display.setCursor(0, 20);
+      display.println(F("Dispensing..."));
+    } else {
+      digitalWrite(IR_SENSOR_ENABLE_PIN, LOW);
+      display.setTextSize(1);
+      display.setCursor(0, 0);
+      display.print(F("Pads: "));
+      display.println(padCount);
+      display.print(F("Status: "));
+      display.println(paymentStatus);
+      display.print(F("System: "));
+      display.println(systemStatus);
+    }
+    display.display();
+
+    // Control motor based on server state
+    if (dispensing && !motorStarted) {
+      startMotor();
+    } else if (!dispensing && motorStarted) {
+      stopMotor();
+    }
+  } else {
+    Serial.printf_P(PSTR("Display data failed, error: %s\n"), http.errorToString(httpCode).c_str());
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println(F("Server error"));
+    display.println(http.errorToString(httpCode));
+    display.display();
+  }
+  http.end();
+}
+
+void updatePaymentStatus() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("Saving pending update..."));
+    File file = SPIFFS.open("/pending.txt", "w");
+    if (file) {
+      file.println("pending");
+      file.close();
+    }
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(client, getFlashString(updatePaymentStatusURL));
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(5000);
+  
+  String jsonPayload = "{\"paymentStatus\":\"ready\",\"authCode\":\"" + getFlashString(authCode) + "\"}";
+  int httpCode = http.POST(jsonPayload);
+
+  if (httpCode == HTTP_CODE_OK) {
+    Serial.println(F("Payment status updated successfully"));
+    if (SPIFFS.exists("/pending.txt")) {
+      SPIFFS.remove("/pending.txt");
+    }
+  } else {
+    Serial.printf_P(PSTR("Payment update failed, error: %s\n"), http.errorToString(httpCode).c_str());
+  }
+  http.end();
+}
+
+String getCurrentPaymentId() {
+  if (WiFi.status() != WL_CONNECTED) return "";
+
+  HTTPClient http;
+  String url = getFlashString(currentPaymentRoute) + "?authCode=" + getFlashString(authCode);
+  http.begin(client, url);
+  http.setTimeout(5000);
+
+  String paymentId = "";
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    
+    // Extract payment ID
+    int idStart = payload.indexOf("\"currentPaymentId\":\"");
+    if (idStart != -1) {
+      idStart += 20;
+      int idEnd = payload.indexOf("\"", idStart);
+      if (idEnd != -1) {
+        paymentId = payload.substring(idStart, idEnd);
+      }
+    }
+  }
+  http.end();
+  return paymentId;
+}
+
+void startRefundProcess(const String& paymentId, const String& reason) {
+  if (paymentId.isEmpty()) return;
+
+  HTTPClient http;
+  http.begin(client, getFlashString(refundURL));
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(5000);
+  
+  String jsonPayload = "{\"paymentId\":\"" + paymentId + "\",\"reason\":\"" + reason + "\"}";
+  int httpCode = http.POST(jsonPayload);
+
+  if (httpCode == HTTP_CODE_OK) {
+    Serial.println(F("Refund initiated successfully"));
+    setDispensingStatus(false);
+  } else {
+    Serial.printf_P(PSTR("Refund failed, error: %s\n"), http.errorToString(httpCode).c_str());
+  }
+  http.end();
+}
+
+void setDispensingStatus(bool status) {
+  HTTPClient http;
+  String url = getFlashString(displayURL) + "?authCode=" + getFlashString(authCode);
+  http.begin(client, url);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(5000);
+  
+  String jsonPayload = "{\"dispensing\":" + String(status ? "true" : "false") + "}";
+  int httpCode = http.POST(jsonPayload);
+
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.printf_P(PSTR("Dispensing update failed, error: %s\n"), http.errorToString(httpCode).c_str());
+  }
+  http.end();
+}
+
+void handleMotorTimeout() {
+  Serial.println(F("Motor timeout detected!"));
+  String paymentId = getCurrentPaymentId();
+  if (!paymentId.isEmpty()) {
+    startRefundProcess(paymentId, "Motor timeout");
+  }
+  resetMotorState();
+  stopMotor();
+}
+
+void handleIRSensorTrigger() {
+  Serial.println(F("IR sensor triggered - Valid dispense"));
+  resetMotorState();
+  stopMotor();
+}
+
+void resetMotorState() {
+  irInterruptDetected = false;
+}
+
+void startMotor() {
+  if (!motorStarted) {
+    motorStarted = true;
+    motorStartTime = millis();
+    irInterruptDetected = false;
+    
+    // Motor sequence
+    digitalWrite(MOTOR_PIN1, LOW);
+    digitalWrite(MOTOR_PIN2, HIGH);
+    analogWrite(MOTOR_ENABLE_PIN, 1023);
+    delay(500);
+    digitalWrite(MOTOR_PIN1, HIGH);
+    digitalWrite(MOTOR_PIN2, LOW);
+  }
+}
+
+void stopMotor() {
+  analogWrite(MOTOR_ENABLE_PIN, 0);
+  digitalWrite(MOTOR_PIN1, LOW);
+  digitalWrite(MOTOR_PIN2, LOW);
+  motorStarted = false;
+  updatePaymentStatus();
+}
