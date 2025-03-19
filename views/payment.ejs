@@ -183,6 +183,16 @@
       <button id="pay-button" class="payment-button"><i class="fas fa-lock"></i> Pay Securely - ₹5.30</button>
       <div id="status-message" class="status-message" style="display: none;"></div>
     </div>
+    <div class="status-card system-status">
+      <div class="status-item">
+        <span>System Status</span>
+        <span id="system-status-badge" class="badge badge-active">Active</span>
+      </div>
+      <div id="system-status-message" class="status-detail" style="display: none;">
+        <i class="fas fa-info-circle"></i> 
+        <span id="system-status-detail">System is operational</span>
+      </div>
+    </div>
 
     <div class="security-info">
       <div class="security-item">
@@ -205,12 +215,99 @@
     </div>
   </div>
 
+  <style>
+    .badge-active {
+      background: rgba(0, 255, 136, 0.2);
+      color: #00FF88;
+    }
+    
+    .badge-inactive {
+      background: rgba(255, 68, 68, 0.2);
+      color: #FF4444;
+    }
+    
+    .badge-warning {
+      background: rgba(255, 193, 7, 0.2);
+      color: #FFC107;
+    }
+    
+    .badge-processing {
+      background: rgba(11, 95, 255, 0.2);
+      color: var(--razorpay-blue);
+    }
+    
+    .badge-error {
+      background: rgba(255, 68, 68, 0.2);
+      color: #FF4444;
+    }
+    
+    .status-detail {
+      font-size: 0.85rem;
+      color: #A0A7C7;
+      margin-top: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .system-status {
+      margin-bottom: 1.5rem;
+    }
+  </style>
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       const payButton = document.getElementById('pay-button');
       const statusMessage = document.getElementById('status-message');
       const padCountElement = document.getElementById('padCount');
-      
+      function updateSystemStatus() {
+    fetch('/check?authCode=guest')
+      .then(response => response.json())
+      .then(data => {
+        const systemStatusBadge = document.getElementById('system-status-badge');
+        const systemStatusMessage = document.getElementById('system-status-message');
+        const systemStatusDetail = document.getElementById('system-status-detail');
+        
+        if (data.paymentStatus === 'inactive') {
+          systemStatusBadge.textContent = 'Inactive';
+          systemStatusBadge.className = 'badge badge-inactive';
+          systemStatusMessage.style.display = 'block';
+          systemStatusDetail.textContent = 'System is temporarily unavailable. Please try again later.';
+          disableButton('System offline');
+        } else if (data.padCount === 0) {
+          systemStatusBadge.textContent = 'Out of Stock';
+          systemStatusBadge.className = 'badge badge-warning';
+          systemStatusMessage.style.display = 'block';
+          systemStatusDetail.textContent = 'Pads are currently out of stock. Please check back later.';
+          disableButton('Out of Stock');
+        } else if (data.dispensing) {
+          systemStatusBadge.textContent = 'Dispensing';
+          systemStatusBadge.className = 'badge badge-processing';
+          systemStatusMessage.style.display = 'block';
+          systemStatusDetail.textContent = 'System is currently dispensing a pad. Please wait.';
+          disableButton('Dispensing in progress');
+        } else {
+          systemStatusBadge.textContent = 'Active';
+          systemStatusBadge.className = 'badge badge-active';
+          systemStatusMessage.style.display = 'none';
+          enableButton();
+        }
+      })
+      .catch(error => {
+        console.error('Error checking system status:', error);
+        const systemStatusBadge = document.getElementById('system-status-badge');
+        systemStatusBadge.textContent = 'Connection Error';
+        systemStatusBadge.className = 'badge badge-error';
+        document.getElementById('system-status-message').style.display = 'block';
+        document.getElementById('system-status-detail').textContent = 'Unable to connect to server. Please try again later.';
+        disableButton('Connection Error');
+      });
+  }
+  
+  // Update system status periodically
+  setInterval(updateSystemStatus, 5000);
+  
+  // Call immediately on page load
+  updateSystemStatus();
       // Convert pad count text to a number
       const padCount = parseInt(padCountElement.textContent, 10);
       

@@ -522,6 +522,67 @@ app.post('/update-payment-status', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+// Add this route to handle Wi-Fi status reports from the ESP8266
+app.post('/inactiveduetowifi', async (req, res) => {
+  const { status, authCode } = req.body;
+  
+  // Validate auth code
+  if (authCode !== process.env.AUTH_CODE) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  try {
+    // Log the Wi-Fi status update
+    await addLog('wifi', `Wi-Fi status update: ${status}`);
+    
+    // If Wi-Fi is disconnected, update system state to inactive
+    if (status === 'disconnected') {
+      const inactiveDate = new Date(Date.now()).toISOString().slice(0, 19).replace('T', ' ');
+      await updateSystemState({
+        payment_status: 'inactive',
+        inactive_since: inactiveDate
+      });
+      
+      await addLog('state', 'System marked inactive due to Wi-Fi disconnection');
+      
+      // Send notification email if Wi-Fi has been disconnected
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: process.env.NOTIFICATION_EMAIL,
+        subject: 'Alert: Wi-Fi Disconnected on Pad Dispenser',
+        text: `The pad dispenser has reported a Wi-Fi disconnection at ${inactiveDate}. The system has been marked as inactive.`
+      };
+      
+      transporter.sendMail(mailOptions, (err, info) => {
+        if (err) {
+          console.error('Error sending Wi-Fi disconnection email:', err);
+          addLog('error', `Wi-Fi disconnection email error: ${err.message}`);
+        } else {
+          console.log('Wi-Fi disconnection email sent:', info.response);
+          addLog('notification', 'Wi-Fi disconnection email sent');
+        }
+      });
+    } 
+    // If Wi-Fi is reconnected, update system state to ready
+    else if (status === 'connected') {
+      // Only update if system was previously inactive due to Wi-Fi
+      const currentState = await getSystemState();
+      if (currentState.payment_status === 'inactive') {
+        await updateSystemState({
+          payment_status: 'ready',
+          inactive_since: null
+        });
+        await addLog('state', 'System restored to ready state after Wi-Fi reconnection');
+      }
+    }
+    
+    res.json({ success: true, message: `Wi-Fi status updated: ${status}` });
+  } catch (error) {
+    console.error('Error handling Wi-Fi status update:', error);
+    await addLog('error', `Wi-Fi status update error: ${error.message}`);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Check System Status (for device monitoring)
 app.get('/check', async (req, res) => {

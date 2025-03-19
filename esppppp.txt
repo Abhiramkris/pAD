@@ -160,7 +160,7 @@ void checkPaymentStatus() {
     Serial.println(payload);
     
     // Check if payment is successful and we should dispense
-    if (payload.indexOf("\"dispensing\":true") != -1) {
+    if (payload.indexOf("\"dispensing\":1") != -1) {
       Serial.println(F("Payment successful! Starting motor"));
       startMotor();
     } else if (motorStarted) {
