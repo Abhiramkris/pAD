@@ -1,426 +1,481 @@
-<!DOCTYPE html>
-<html>
+  <!DOCTYPE html>
+  <html lang="en">
 
-<head>
-  <meta charset="UTF-8">
-  <title>Secure Pad Dispenser</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-  <style>
-    :root {
-      --razorpay-blue: #0B5FFF;
-      --razorpay-dark: #0A0F2D;
-      --razorpay-light: #F8F9FF;
-      --bg-gradient: linear-gradient(135deg, #0A0F2D 0%, #1A1F3D 100%);
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      background: var(--bg-gradient);
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-family: 'Inter', sans-serif;
-      color: var(--razorpay-light);
-    }
-
-    .container {
-      background: rgba(255, 255, 255, 0.05);
-      border-radius: 16px;
-      padding: 2rem;
-      width: 90%;
-      max-width: 440px;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 8px 32px rgba(11, 95, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    .header {
-      text-align: center;
-      margin-bottom: 2rem;
-    }
-
-    .razorpay-logo {
-      width: 180px;
-      margin-bottom: 1.5rem;
-      filter: brightness(0) invert(1);
-    }
-
-    h1 {
-      color: var(--razorpay-light);
-      font-size: 1.8rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .status-card {
-      background: rgba(11, 95, 255, 0.1);
-      border-radius: 12px;
-      padding: 1.2rem;
-      margin: 1.5rem 0;
-    }
-
-    .status-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin: 0.8rem 0;
-      font-size: 0.95rem;
-    }
-
-    .badge {
-      background: rgba(11, 95, 255, 0.2);
-      color: var(--razorpay-blue);
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 0.8rem;
-    }
-
-    .payment-button {
-      background: var(--razorpay-blue);
-      width: 100%;
-      border: none;
-      border-radius: 8px;
-      padding: 1.2rem;
-      color: white;
-      font-size: 1.1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 12px;
-      margin: 1.5rem 0;
-    }
-
-    .payment-button:hover:not(.disabled) {
-      background: #094ECC;
-      transform: translateY(-2px);
-    }
-
-    .payment-button.disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      background: #888;
-    }
-
-    .status-message {
-      color: #ff4444;
-      font-weight: bold;
-      margin-top: 10px;
-      text-align: center;
-    }
-
-    .security-info {
-      border-top: 1px solid rgba(255, 255, 255, 0.1);
-      padding-top: 1.5rem;
-      margin-top: 1.5rem;
-    }
-
-    .security-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin: 1rem 0;
-      color: #A0A7C7;
-    }
-
-    .trust-badges {
-      display: flex;
-      justify-content: center;
-      gap: 1.5rem;
-      margin-top: 1.5rem;
-      opacity: 0.8;
-    }
-
-    .trust-badges img {
-      height: 32px;
-      filter: grayscale(1) brightness(2);
-    }
-
-    @keyframes pulse {
-      0%,
-      100% {
-        transform: scale(1);
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Secure Hygiene Pad Dispenser Payment Portal">
+    <meta name="theme-color" content="#0A0F2D">
+    <title>Secure Pad Dispenser</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <style>
+      :root {
+        --razorpay-blue: #0B5FFF;
+        --razorpay-dark: #0A0F2D;
+        --razorpay-light: #F8F9FF;
+        --bg-gradient: linear-gradient(135deg, #0A0F2D 0%, #1A1F3D 100%);
       }
 
-      50% {
-        transform: scale(1.02);
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
-    }
 
-    .processing {
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-  </style>
-</head>
+      body {
+        background: var(--bg-gradient);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        color: var(--razorpay-light);
+        padding: 1rem;
+      }
 
-<body>
-  <div class="container">
-    <div class="header">
-      <img src="https://razorpay.com/build/browser/static/logo-blue.5a47f1e3.svg" class="razorpay-logo" alt="Razorpay Secure">
-      <h1>Hygiene Pad Dispenser</h1>
-    </div>
+      .container {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 16px;
+        padding: 1.5rem;
+        width: 100%;
+        max-width: 440px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(11, 95, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
 
-    <div class="status-card">
-      <div class="status-item">
-        <span>Available Pads</span>
-        <strong id="padCount"><%= padCount %></strong>
-      </div>
-      <div class="status-item">
-        <span>Connection Status</span>
-        <span style="color: #00FF88"><i class="fas fa-circle"></i> Secure</span>
-      </div>
-    </div>
+      .header {
+        text-align: center;
+        margin-bottom: 1.5rem;
+      }
 
-    <div class="payment-container">
-      <button id="pay-button" class="payment-button"><i class="fas fa-lock"></i> Pay Securely - ₹5.30</button>
-      <div id="status-message" class="status-message" style="display: none;"></div>
-    </div>
-    <div class="status-card system-status">
-      <div class="status-item">
-        <span>System Status</span>
-        <span id="system-status-badge" class="badge badge-active">Active</span>
-      </div>
-      <div id="system-status-message" class="status-detail" style="display: none;">
-        <i class="fas fa-info-circle"></i> 
-        <span id="system-status-detail">System is operational</span>
-      </div>
-    </div>
+      .razorpay-logo {
+        width: 160px;
+        max-width: 70%;
+        margin-bottom: 1.2rem;
+        filter: brightness(0) invert(1);
+      }
 
-    <div class="security-info">
-      <div class="security-item">
-        <i class="fas fa-shield-alt"></i>
-        <span>PCI DSS Certified Payments</span>
-      </div>
-      <div class="security-item">
-        <i class="fas fa-user-shield"></i>
-        <span>256-bit SSL Encryption</span>
-      </div>
-      <div class="security-item">
-        <i class="fas fa-check-double"></i>
-        <span>3D Secure Authentication</span>
-      </div>
-    </div>
+      h1 {
+        color: var(--razorpay-light);
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
 
-    <div class="trust-badges">
-      <img src="https://razorpay.com/build/browser/static/nacha.5a4d3a2e.svg" alt="Nacha Certified">
-      <img src="https://razorpay.com/build/browser/static/pci.7d4f5d4c.svg" alt="PCI Certified">
-    </div>
-  </div>
+      .status-card {
+        background: rgba(11, 95, 255, 0.1);
+        border-radius: 12px;
+        padding: 1.2rem;
+        margin: 1.2rem 0;
+      }
 
-  <style>
-    .badge-active {
-      background: rgba(0, 255, 136, 0.2);
-      color: #00FF88;
-    }
-    
-    .badge-inactive {
-      background: rgba(255, 68, 68, 0.2);
-      color: #FF4444;
-    }
-    
-    .badge-warning {
-      background: rgba(255, 193, 7, 0.2);
-      color: #FFC107;
-    }
-    
-    .badge-processing {
-      background: rgba(11, 95, 255, 0.2);
-      color: var(--razorpay-blue);
-    }
-    
-    .badge-error {
-      background: rgba(255, 68, 68, 0.2);
-      color: #FF4444;
-    }
-    
-    .status-detail {
-      font-size: 0.85rem;
-      color: #A0A7C7;
-      margin-top: 0.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    
-    .system-status {
-      margin-bottom: 1.5rem;
-    }
-  </style>
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const payButton = document.getElementById('pay-button');
-      const statusMessage = document.getElementById('status-message');
-      const padCountElement = document.getElementById('padCount');
-      function updateSystemStatus() {
-    fetch('/check?authCode=guest')
-      .then(response => response.json())
-      .then(data => {
-        const systemStatusBadge = document.getElementById('system-status-badge');
-        const systemStatusMessage = document.getElementById('system-status-message');
-        const systemStatusDetail = document.getElementById('system-status-detail');
-        
-        if (data.paymentStatus === 'inactive') {
-          systemStatusBadge.textContent = 'Inactive';
-          systemStatusBadge.className = 'badge badge-inactive';
-          systemStatusMessage.style.display = 'block';
-          systemStatusDetail.textContent = 'System is temporarily unavailable. Please try again later.';
-          disableButton('System offline');
-        } else if (data.padCount === 0) {
-          systemStatusBadge.textContent = 'Out of Stock';
-          systemStatusBadge.className = 'badge badge-warning';
-          systemStatusMessage.style.display = 'block';
-          systemStatusDetail.textContent = 'Pads are currently out of stock. Please check back later.';
-          disableButton('Out of Stock');
-        } else if (data.dispensing) {
-          systemStatusBadge.textContent = 'Dispensing';
-          systemStatusBadge.className = 'badge badge-processing';
-          systemStatusMessage.style.display = 'block';
-          systemStatusDetail.textContent = 'System is currently dispensing a pad. Please wait.';
-          disableButton('Dispensing in progress');
-        } else {
-          systemStatusBadge.textContent = 'Active';
-          systemStatusBadge.className = 'badge badge-active';
-          systemStatusMessage.style.display = 'none';
-          enableButton();
+      .status-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 0.8rem 0;
+        font-size: 0.95rem;
+      }
+
+      .badge {
+        background: rgba(11, 95, 255, 0.2);
+        color: var(--razorpay-blue);
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+      }
+
+      .payment-button {
+        background: var(--razorpay-blue);
+        width: 100%;
+        border: none;
+        border-radius: 8px;
+        padding: 1rem;
+        color: white;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        margin: 1.2rem 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .payment-button:hover:not(.disabled) {
+        background: #094ECC;
+        transform: translateY(-2px);
+      }
+
+      .payment-button:active:not(.disabled) {
+        transform: translateY(0);
+      }
+
+      .payment-button.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: #888;
+      }
+
+      .status-message {
+        color: #ff4444;
+        font-weight: bold;
+        margin-top: 10px;
+        text-align: center;
+      }
+
+      .security-info {
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding-top: 1.2rem;
+        margin-top: 1.2rem;
+      }
+
+      .security-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0.8rem 0;
+        color: #A0A7C7;
+        font-size: 0.9rem;
+      }
+
+      .trust-badges {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        margin-top: 1.2rem;
+        opacity: 0.8;
+      }
+
+      .trust-badges img {
+        height: 28px;
+        filter: grayscale(1) brightness(2);
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
         }
-      })
-      .catch(error => {
-        console.error('Error checking system status:', error);
-        const systemStatusBadge = document.getElementById('system-status-badge');
-        systemStatusBadge.textContent = 'Connection Error';
-        systemStatusBadge.className = 'badge badge-error';
-        document.getElementById('system-status-message').style.display = 'block';
-        document.getElementById('system-status-detail').textContent = 'Unable to connect to server. Please try again later.';
-        disableButton('Connection Error');
-      });
-  }
-  
-  // Update system status periodically
-  setInterval(updateSystemStatus, 5000);
-  
-  // Call immediately on page load
-  updateSystemStatus();
-      // Convert pad count text to a number
-      const padCount = parseInt(padCountElement.textContent, 10);
+
+        50% {
+          transform: scale(1.02);
+        }
+      }
+
+      .processing {
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+
+      .badge-active {
+        background: rgba(0, 255, 136, 0.2);
+        color: #00FF88;
+      }
       
-      // Function to check payment button state
-      function checkPaymentButtonState() {
-        // Check for pad availability first
+      .badge-inactive {
+        background: rgba(255, 68, 68, 0.2);
+        color: #FF4444;
+      }
+      
+      .badge-warning {
+        background: rgba(255, 193, 7, 0.2);
+        color: #FFC107;
+      }
+      
+      .badge-processing {
+        background: rgba(11, 95, 255, 0.2);
+        color: var(--razorpay-blue);
+      }
+      
+      .badge-error {
+        background: rgba(255, 68, 68, 0.2);
+        color: #FF4444;
+      }
+      
+      .status-detail {
+        font-size: 0.85rem;
+        color: #A0A7C7;
+        margin-top: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .system-status {
+        margin-bottom: 1.2rem;
+      }
+
+      /* Mobile-specific adjustments */
+      @media (max-width: 480px) {
+        .container {
+          padding: 1.2rem;
+        }
+        
+        h1 {
+          font-size: 1.3rem;
+        }
+        
+        .status-card {
+          padding: 1rem;
+        }
+        
+        .payment-button {
+          padding: 0.9rem;
+        }
+        
+        .security-item {
+          font-size: 0.8rem;
+        }
+        
+        .trust-badges img {
+          height: 24px;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <div class="header">
+        <img src="https://razorpay.com/build/browser/static/logo-blue.5a47f1e3.svg" class="razorpay-logo" alt="Razorpay Secure">
+        <h1>Hygiene Pad Dispenser</h1>
+      </div>
+
+      <div class="status-card">
+        <div class="status-item">
+          <span>Available Pads</span>
+          <strong id="padCount"><%= padCount %></strong>
+        </div>
+        <div class="status-item">
+          <span>Connection Status</span>
+          <span style="color: #00FF88"><i class="fas fa-circle"></i> Secure</span>
+        </div>
+      </div>
+
+      <div class="payment-container">
+        <button id="pay-button" class="payment-button"><i class="fas fa-lock"></i> Pay Securely - ₹5.30</button>
+        <div id="status-message" class="status-message" style="display: none;"></div>
+      </div>
+      <div class="status-card system-status">
+        <div class="status-item">
+          <span>System Status</span>
+          <span id="system-status-badge" class="badge badge-active">Active</span>
+        </div>
+        <div id="system-status-message" class="status-detail" style="display: none;">
+          <i class="fas fa-info-circle"></i> 
+          <span id="system-status-detail">System is operational</span>
+        </div>
+      </div>
+
+      <div class="security-info">
+        <div class="security-item">
+          <i class="fas fa-shield-alt"></i>
+          <span>PCI DSS Certified Payments</span>
+        </div>
+        <div class="security-item">
+          <i class="fas fa-user-shield"></i>
+          <span>256-bit SSL Encryption</span>
+        </div>
+        <div class="security-item">
+          <i class="fas fa-check-double"></i>
+          <span>3D Secure Authentication</span>
+        </div>
+      </div>
+
+      <div class="trust-badges">
+        <img src="https://razorpay.com/build/browser/static/nacha.5a4d3a2e.svg" alt="Nacha Certified">
+        <img src="https://razorpay.com/build/browser/static/pci.7d4f5d4c.svg" alt="PCI Certified">
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        const payButton = document.getElementById('pay-button');
+        const statusMessage = document.getElementById('status-message');
+        const padCountElement = document.getElementById('padCount');
+        
+        // Convert pad count text to a number
+        const padCount = parseInt(padCountElement.textContent, 10);
+        
+        // Disable button immediately if pad count is zero
         if (padCount === 0) {
           disableButton('Out of Stock');
-          return;
         }
         
-        // Then check server state
-        fetch('/payment-button-state')
-          .then(response => response.json())
-          .then(data => {
-            if (data.disableButton) {
-              disableButton(data.reason);
-            } else {
-              enableButton();
-            }
-          })
-          .catch(error => {
-            console.error('Error checking payment button state:', error);
-            // If we can't reach the server, assume system is offline
-            disableButton('System offline');
-          });
-      }
-      
-      // Function to disable button with reason
-      function disableButton(reason) {
-        payButton.disabled = true;
-        payButton.classList.add('disabled');
-        statusMessage.textContent = reason;
-        statusMessage.style.display = 'block';
-      }
-      
-      // Function to enable button
-      function enableButton() {
-        payButton.disabled = false;
-        payButton.classList.remove('disabled');
-        statusMessage.style.display = 'none';
-      }
-      
-      // Handle payment button click
-      payButton.addEventListener('click', async function() {
-        if (payButton.disabled) return; // Prevents execution if disabled
-        
-        try {
-          payButton.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
-          payButton.disabled = true;
-          
-          const response = await fetch('/create-order', {
-            method: 'POST'
-          });
-          const order = await response.json();
-          
-          const options = {
-            key: "<%= key_id %>",
-            amount: order.amount,
-            currency: order.currency,
-            name: "Secure Pad Dispenser",
-            description: "Hygiene Product Purchase",
-            order_id: order.id,
-            handler: async function(response) {
-              const verifyResponse = await fetch('/verify-payment', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_order_id: order.id,
-                  razorpay_signature: response.razorpay_signature
-                })
-              });
+        function updateSystemStatus() {
+          fetch('/check?authCode=guest')
+            .then(response => response.json())
+            .then(data => {
+              const systemStatusBadge = document.getElementById('system-status-badge');
+              const systemStatusMessage = document.getElementById('system-status-message');
+              const systemStatusDetail = document.getElementById('system-status-detail');
               
-              const verifyResult = await verifyResponse.json();
-              if (verifyResult.status === 'success') {
-                window.location.href = '/dispensing';
+              // Update the pad count from server data if available
+              if (data.padCount !== undefined) {
+                padCountElement.textContent = data.padCount;
+              }
+              
+              if (data.paymentStatus === 'inactive') {
+                systemStatusBadge.textContent = 'Inactive';
+                systemStatusBadge.className = 'badge badge-inactive';
+                systemStatusMessage.style.display = 'block';
+                systemStatusDetail.textContent = 'System is temporarily unavailable. Please try again later.';
+                disableButton('System offline');
+              } else if (data.padCount === 0) {
+                systemStatusBadge.textContent = 'Out of Stock';
+                systemStatusBadge.className = 'badge badge-warning';
+                systemStatusMessage.style.display = 'block';
+                systemStatusDetail.textContent = 'Pads are currently out of stock. Please check back later.';
+                disableButton('Out of Stock');
+              } else if (data.dispensing) {
+                systemStatusBadge.textContent = 'Dispensing';
+                systemStatusBadge.className = 'badge badge-processing';
+                systemStatusMessage.style.display = 'block';
+                systemStatusDetail.textContent = 'System is currently dispensing a pad. Please wait.';
+                disableButton('Dispensing in progress');
               } else {
-                alert('Payment verification failed. Please contact support.');
-                location.reload();
+                systemStatusBadge.textContent = 'Active';
+                systemStatusBadge.className = 'badge badge-active';
+                systemStatusMessage.style.display = 'none';
+                enableButton();
               }
-            },
-            theme: {
-              color: "#0B5FFF"
-            },
-            modal: {
-              ondismiss: function() {
-                payButton.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
-                payButton.disabled = false;
-              }
-            }
-          };
-          
-          const rzp1 = new Razorpay(options);
-          rzp1.open();
-        } catch (error) {
-          console.error('Payment error:', error);
-          alert('Secure payment initialization failed. Please try again.');
-        } finally {
-          payButton.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
-          payButton.disabled = false;
+            })
+            .catch(error => {
+              console.error('Error checking system status:', error);
+              const systemStatusBadge = document.getElementById('system-status-badge');
+              systemStatusBadge.textContent = 'Connection Error';
+              systemStatusBadge.className = 'badge badge-error';
+              document.getElementById('system-status-message').style.display = 'block';
+              document.getElementById('system-status-detail').textContent = 'Unable to connect to server. Please try again later.';
+              disableButton('Connection Error');
+            });
         }
+        
+        // Function to check payment button state
+        function checkPaymentButtonState() {
+          // Check for pad availability first based on current displayed count
+          const currentPadCount = parseInt(padCountElement.textContent, 10);
+          if (currentPadCount === 0) {
+            disableButton('Out of Stock');
+            return;
+          }
+          
+          // Then check server state
+          fetch('/payment-button-state')
+            .then(response => response.json())
+            .then(data => {
+              if (data.disableButton) {
+                disableButton(data.reason);
+              } else {
+                enableButton();
+              }
+            })
+            .catch(error => {
+              console.error('Error checking payment button state:', error);
+              // If we can't reach the server, assume system is offline
+              disableButton('System offline');
+            });
+        }
+        
+        // Function to disable button with reason
+        function disableButton(reason) {
+          payButton.disabled = true;
+          payButton.classList.add('disabled');
+          statusMessage.textContent = reason;
+          statusMessage.style.display = 'block';
+        }
+        
+        // Function to enable button
+        function enableButton() {
+          const currentPadCount = parseInt(padCountElement.textContent, 10);
+          // Double-check pad count before enabling
+          if (currentPadCount === 0) {
+            disableButton('Out of Stock');
+            return;
+          }
+          
+          payButton.disabled = false;
+          payButton.classList.remove('disabled');
+          statusMessage.style.display = 'none';
+        }
+        
+        // Handle payment button click
+        payButton.addEventListener('click', async function() {
+          if (payButton.disabled) return; // Prevents execution if disabled
+          
+          try {
+            payButton.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Initializing Secure Payment`;
+            payButton.disabled = true;
+            
+            const response = await fetch('/create-order', {
+              method: 'POST'
+            });
+            const order = await response.json();
+            
+            const options = {
+              key: "<%= key_id %>",
+              amount: order.amount,
+              currency: order.currency,
+              name: "Secure Pad Dispenser",
+              description: "Hygiene Product Purchase",
+              order_id: order.id,
+              handler: async function(response) {
+                const verifyResponse = await fetch('/verify-payment', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_order_id: order.id,
+                    razorpay_signature: response.razorpay_signature
+                  })
+                });
+                
+                const verifyResult = await verifyResponse.json();
+                if (verifyResult.status === 'success') {
+                  window.location.href = '/dispensing';
+                } else {
+                  alert('Payment verification failed. Please contact support.');
+                  location.reload();
+                }
+              },
+              theme: {
+                color: "#0B5FFF"
+              },
+              modal: {
+                ondismiss: function() {
+                  payButton.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
+                  payButton.disabled = false;
+                }
+              }
+            };
+            
+            const rzp1 = new Razorpay(options);
+            rzp1.open();
+          } catch (error) {
+            console.error('Payment error:', error);
+            alert('Secure payment initialization failed. Please try again.');
+          } finally {
+            payButton.innerHTML = `<i class="fas fa-lock"></i> Pay Securely - ₹5.30`;
+            payButton.disabled = false;
+          }
+        });
+        
+        // Update system status immediately when page loads
+        updateSystemStatus();
+        
+        // Then check every 5 seconds
+        setInterval(updateSystemStatus, 5000);
+        
+        // Also check payment button state
+        checkPaymentButtonState();
+        setInterval(checkPaymentButtonState, 5000);
       });
-      
-      // Check immediately when page loads
-      checkPaymentButtonState();
-      
-      // Then check every 5 seconds
-      setInterval(checkPaymentButtonState, 5000);
-    });
-  </script>
-</body>
+    </script>
+  </body>
 
-</html>
+  </html>

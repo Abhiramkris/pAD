@@ -1,6 +1,7 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 
 // WiFi Credentials
 const char* ssid = "asdff";
@@ -9,6 +10,13 @@ const char* password = "";
 // Server URLs - store in flash memory to save RAM
 const char PROGMEM checkURL[] = "https://pad-ew3v.onrender.com/check";
 const char PROGMEM authCode[] = "your_secret_auth_code";
+const char PROGMEM updatePaymentStatusURL[] = "https://pad-ew3v.onrender.com/update-payment-status";
+const char PROGMEM currentPaymentRoute[] = "https://pad-ew3v.onrender.com/currentpaymentid";
+const char PROGMEM refundURL[] = "https://pad-ew3v.onrender.com/refund";
+const char PROGMEM wifiStatusURL[] = "https://pad-ew3v.onrender.com/inactiveduetowifi";
+unsigned long lastWifiStatusReportTime = 0;
+#define WIFI_STATUS_REPORT_INTERVAL 30000  // Report every 30 seconds
+bool lastReportedWifiStatus = true;  // true = connected, false = disconnected
 
 // ESP8266 Pin Configuration (NodeMCU)
 #define MOTOR_PIN1 D1
@@ -23,25 +31,44 @@ unsigned long lastHttpRequestTime = 0;
 #define HTTP_REQUEST_INTERVAL 5000
 #define HTTP_TIMEOUT 15000  // Increased timeout for HTTP requests
 #define WIFI_RETRY_INTERVAL 10000
+#define MOTOR_TIMEOUT 50000  // Overall motor timeout
+#define IR_TIMEOUT 10000     // Time to wait for IR response before refund
+#define BACKWARD_ROTATION_TIME 3000 // Time for backward rotation phase
 
 // System state
 volatile bool irInterruptDetected = false;
 unsigned long motorStartTime = 0;
-#define MOTOR_TIMEOUT 50000
 bool motorStarted = false;
+unsigned long backwardRotationStartTime = 0;
+bool inBackwardRotationPhase = false;
 int httpRetryCount = 0;
 #define MAX_HTTP_RETRIES 5  // Increased number of retries
+bool pendingPaymentUpdate = false;
+int hallTriggerCount = 0;
+unsigned long lastDebugPrint = 0;
+
+// New variables for dispensing status tracking
+static bool pendingDispensingUpdate = false;
+static bool lastDispensingState = false;
 
 // Helper function to read from flash
 String getFlashString(const char* flashStr) {
   return String((const __FlashStringHelper*)flashStr);
 }
 
-// ISR for IR sensor
+// Modified ISR for IR sensor - Stop motor immediately
 void ICACHE_RAM_ATTR irSensorISR() {
-  if (millis() - lastIrTriggerTime > 100) {
+  if (millis() - lastIrTriggerTime > 50) {  // Reduced debounce to 50ms
     irInterruptDetected = true;
     lastIrTriggerTime = millis();
+    
+    // Stop motor immediately from within ISR
+    if (motorStarted) {
+      analogWrite(MOTOR_ENABLE_PIN, 0);
+      digitalWrite(MOTOR_PIN1, LOW);
+      digitalWrite(MOTOR_PIN2, LOW);
+      // We'll still set motorStarted to false in the main loop
+    }
   }
 }
 
@@ -78,11 +105,221 @@ void setupWiFi() {
   }
 }
 
+// Get current payment ID from server
+String getCurrentPaymentId() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("WiFi not connected, cannot get current payment ID"));
+    return "";
+  }
+  
+  Serial.println(F("Fetching current payment ID..."));
+  
+  WiFiClientSecure client;
+  client.setInsecure();  // Accept any certificate
+  client.setTimeout(HTTP_TIMEOUT);
+  
+  HTTPClient http;
+  String url = getFlashString(currentPaymentRoute) + "?authCode=" + getFlashString(authCode);
+  
+  http.begin(client, url);
+  http.setTimeout(HTTP_TIMEOUT);
+  
+  Serial.print(F("Sending HTTP request to: "));
+  Serial.println(url);
+  
+  int httpCode = http.GET();
+  String paymentId = "";
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String response = http.getString();
+    Serial.print(F("Response: "));
+    Serial.println(response);
+    
+    // Parse JSON response
+    DynamicJsonDocument doc(256);
+    DeserializationError error = deserializeJson(doc, response);
+    
+    if (!error) {
+      paymentId = doc["currentPaymentId"].as<String>();
+      Serial.println(F("Current Payment ID: ") + paymentId);
+    } else {
+      Serial.print(F("JSON parse error in getCurrentPaymentId: "));
+      Serial.println(error.c_str());
+    }
+  } else {
+    Serial.printf_P(PSTR("Error fetching current payment id. HTTP code: %d\n"), httpCode);
+  }
+  
+  http.end();
+  return paymentId;
+}
+
+// Modified function to set dispensing status with retry logic
+void setDispensingStatus(bool isDispensing) {
+  // Store the requested state for retries
+  if (WiFi.status() != WL_CONNECTED) {
+    pendingDispensingUpdate = true;
+    lastDispensingState = isDispensing;
+    Serial.println(F("WiFi not connected, will retry setting dispensing status later"));
+    return;
+  }
+  
+  // If we have a connection and need to update, proceed
+  if (pendingDispensingUpdate || isDispensing != lastDispensingState) {
+    Serial.print(F("Setting dispensing status to: "));
+    Serial.println(isDispensing ? F("true") : F("false"));
+    
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(HTTP_TIMEOUT);
+    
+    HTTPClient http;
+    String url = getFlashString(updatePaymentStatusURL) + "?authCode=" + getFlashString(authCode);
+    
+    http.begin(client, url);
+    http.setTimeout(HTTP_TIMEOUT);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Connection", "close");
+    
+    String jsonPayload = "{\"dispensing\":" + String(isDispensing ? "1" : "0") + ", \"authCode\":\"" + getFlashString(authCode) + "\"}";
+    
+    int httpCode = http.POST(jsonPayload);
+    
+    if (httpCode == HTTP_CODE_OK) {
+      Serial.println(F("Dispensing status updated successfully."));
+      pendingDispensingUpdate = false;
+      lastDispensingState = isDispensing;
+    } else {
+      Serial.printf_P(PSTR("Failed to update dispensing status. HTTP code: %d\n"), httpCode);
+      pendingDispensingUpdate = true;
+      lastDispensingState = isDispensing;
+    }
+    
+    http.end();
+  }
+}
+
+// New function to stop the motor without updating payment status
+void stopMotorForRefund() {
+  Serial.println(F("Stopping motor for refund"));
+  analogWrite(MOTOR_ENABLE_PIN, 0);
+  digitalWrite(MOTOR_PIN1, LOW);
+  digitalWrite(MOTOR_PIN2, LOW);
+  motorStarted = false;
+  inBackwardRotationPhase = false;
+  // Set dispensing status to 0 when motor stops, even for refund
+  setDispensingStatus(false);
+  // Note: Do not call updatePaymentStatus() here so that currentPaymentId remains intact
+}
+
+// Function to start refund process
+void startRefundProcess(const String& paymentId, const String& reason) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("WiFi not connected, cannot start refund process"));
+    return;
+  }
+  
+  Serial.println(F("Starting refund process..."));
+  
+  WiFiClientSecure client;
+  client.setInsecure();  // Accept any certificate
+  client.setTimeout(HTTP_TIMEOUT);
+  
+  HTTPClient http;
+  String url = getFlashString(refundURL);
+  
+  http.begin(client, url);
+  http.setTimeout(HTTP_TIMEOUT);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Connection", "close");
+  
+  String postData = "{\"paymentId\":\"" + paymentId + "\", \"reason\":\"" + reason + "\", \"authCode\":\"" + getFlashString(authCode) + "\"}";
+  
+  Serial.print(F("Sending refund request to: "));
+  Serial.println(url);
+  
+  int httpCode = http.POST(postData);
+  Serial.print(F("HTTP response code: "));
+  Serial.println(httpCode);
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String response = http.getString();
+    Serial.print(F("Server response: "));
+    Serial.println(response);
+    Serial.println(F("Refund process initiated successfully."));
+    
+    // Update payment status after refund starts
+    updatePaymentStatus();
+    // Ensure dispensing is set to 0
+    setDispensingStatus(false);
+  } else {
+    Serial.println(F("Refund request failed!"));
+    String response = http.getString();
+    Serial.print(F("Server response: "));
+    Serial.println(response);
+  }
+  
+  http.end();
+}
+
+void reportWifiStatus(bool connected) {
+  if (connected == lastReportedWifiStatus && millis() - lastWifiStatusReportTime < WIFI_STATUS_REPORT_INTERVAL) {
+    return;  // Don't report if status hasn't changed and interval hasn't passed
+  }
+  
+  // Only try to report if we're connected
+  if (!connected) {
+    Serial.println(F("Wi-Fi disconnected, can't report status to server"));
+    lastReportedWifiStatus = false;
+    return;
+  }
+  
+  Serial.println(F("Reporting Wi-Fi status to server..."));
+  
+  WiFiClientSecure client;
+  client.setInsecure();  // Accept any certificate
+  client.setTimeout(HTTP_TIMEOUT);
+  
+  HTTPClient http;
+  String url = getFlashString(wifiStatusURL);
+  
+  http.begin(client, url);
+  http.setTimeout(HTTP_TIMEOUT);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Connection", "close");
+  
+  // Report the current status
+  String jsonPayload = "{\"status\":\"" + String(connected ? "connected" : "disconnected") + 
+                        "\", \"authCode\":\"" + getFlashString(authCode) + "\"}";
+  
+  int httpCode = http.POST(jsonPayload);
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String response = http.getString();
+    Serial.print(F("Wi-Fi status reported successfully: "));
+    Serial.println(response);
+    lastReportedWifiStatus = connected;
+    lastWifiStatusReportTime = millis();
+  } else {
+    Serial.printf_P(PSTR("Failed to report Wi-Fi status. HTTP code: %d\n"), httpCode);
+  }
+  
+  http.end();
+}
+
+// Modified ensureWiFiConnection function to report status changes
 void ensureWiFiConnection() {
   static unsigned long lastReconnectAttempt = 0;
+  bool wifiConnected = (WiFi.status() == WL_CONNECTED);
   
-  if (WiFi.status() != WL_CONNECTED) {
+  if (!wifiConnected) {
     digitalWrite(LED_PIN, LOW);  // LED off when disconnected
+    
+    // Report disconnect status if it just happened
+    if (lastReportedWifiStatus == true) {
+      lastReportedWifiStatus = false;  // Mark as reported
+      // No need to call reportWifiStatus here as we can't send when disconnected
+    }
     
     if (millis() - lastReconnectAttempt > WIFI_RETRY_INTERVAL) {
       Serial.println(F("WiFi disconnected. Reconnecting..."));
@@ -91,37 +328,132 @@ void ensureWiFiConnection() {
     }
   } else {
     digitalWrite(LED_PIN, HIGH);  // LED on when connected
+    
+    // Report connected status if we just reconnected
+    if (lastReportedWifiStatus == false) {
+      reportWifiStatus(true);
+    }
+    
+    // Periodically report status even when no change
+    if (millis() - lastWifiStatusReportTime > WIFI_STATUS_REPORT_INTERVAL) {
+      reportWifiStatus(true);
+    }
   }
 }
 
+// Modified startMotor function to use non-blocking approach
 void startMotor() {
   if (!motorStarted) {
-    Serial.println(F("Starting motor"));
+    Serial.println(F("Starting motor - backward rotation phase"));
     motorStarted = true;
-    motorStartTime = millis();
+    inBackwardRotationPhase = true;
+    backwardRotationStartTime = millis();
+    motorStartTime = millis();  // Initialize motor start time for timeout tracking
     irInterruptDetected = false;
+    hallTriggerCount = 0;
     
-    digitalWrite(MOTOR_PIN1, LOW);
-    digitalWrite(MOTOR_PIN2, HIGH);
-    analogWrite(MOTOR_ENABLE_PIN, 1023);
-    delay(500);
+    // First rotate backward
     digitalWrite(MOTOR_PIN1, HIGH);
     digitalWrite(MOTOR_PIN2, LOW);
+    analogWrite(MOTOR_ENABLE_PIN, 1023);  // Full power
+    
+    // Set dispensing status to 1 when starting motor
+    setDispensingStatus(true);
+    
+    // Debug output
+    Serial.print(F("MOTOR STATUS: Started, PIN values: "));
+    Serial.print(F("MOTOR_PIN1="));
+    Serial.print(digitalRead(MOTOR_PIN1));
+    Serial.print(F(", MOTOR_PIN2="));
+    Serial.print(digitalRead(MOTOR_PIN2));
+    Serial.print(F(", MOTOR_ENABLE_PIN="));
+    Serial.println(analogRead(MOTOR_ENABLE_PIN));
   }
 }
 
+// Modified stopMotor function to also set dispensing status to 0
 void stopMotor() {
   Serial.println(F("Stopping motor"));
   analogWrite(MOTOR_ENABLE_PIN, 0);
   digitalWrite(MOTOR_PIN1, LOW);
   digitalWrite(MOTOR_PIN2, LOW);
   motorStarted = false;
+  inBackwardRotationPhase = false;
+  
+  // Set dispensing status to 0 when motor stops
+  setDispensingStatus(false);
 }
 
+// Updated function to update payment status and set dispensing to 0
+void updatePaymentStatus() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("WiFi not connected, cannot update payment status"));
+    pendingPaymentUpdate = true;
+    return;
+  }
+  
+  Serial.println(F("Updating payment status to ready and setting dispensing to 0..."));
+  
+  WiFiClientSecure client;
+  client.setInsecure();  // Accept any certificate
+  client.setTimeout(HTTP_TIMEOUT);
+  
+  HTTPClient http;
+  String url = getFlashString(updatePaymentStatusURL) + "?authCode=" + getFlashString(authCode);
+  
+  http.begin(client, url);
+  http.setTimeout(HTTP_TIMEOUT);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Connection", "close");
+  
+  // Updated JSON payload to set dispensing to 0
+  String jsonPayload = "{\"paymentStatus\":\"ready\", \"dispensing\":0, \"authCode\":\"" + getFlashString(authCode) + "\"}";
+  
+  Serial.print(F("Sending update request to: "));
+  Serial.println(url);
+  
+  int httpCode = http.POST(jsonPayload);
+  Serial.print(F("HTTP response code: "));
+  Serial.println(httpCode);
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    Serial.print(F("Response: "));
+    Serial.println(payload);
+    Serial.println(F("Payment status updated to ready and dispensing set to 0 successfully."));
+    pendingPaymentUpdate = false;
+    
+    // Also update our local tracking of dispensing status
+    pendingDispensingUpdate = false;
+    lastDispensingState = false;
+  } else {
+    Serial.printf_P(PSTR("Update failed, code: %d, error: %s\n"), 
+                    httpCode, http.errorToString(httpCode).c_str());
+    pendingPaymentUpdate = true;
+  }
+  
+  http.end();
+}
+
+// Modified checkPaymentStatus to handle pending dispensing updates
 void checkPaymentStatus() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println(F("WiFi not connected, cannot check payment"));
     return;
+  }
+  
+  // Try to process any pending updates first
+  if (pendingPaymentUpdate || pendingDispensingUpdate) {
+    if (pendingDispensingUpdate) {
+      setDispensingStatus(lastDispensingState);
+    }
+    if (pendingPaymentUpdate) {
+      updatePaymentStatus();
+    }
+    if (pendingPaymentUpdate || pendingDispensingUpdate) {
+      // If still pending, don't check for new payments
+      return;
+    }
   }
   
   Serial.println(F("Checking payment status..."));
@@ -161,6 +493,7 @@ void checkPaymentStatus() {
     
     // Check if payment is successful and we should dispense
     if (payload.indexOf("\"dispensing\":1") != -1) {
+      Serial.println(F("DEBUG: Dispensing=1 detected in response!"));
       Serial.println(F("Payment successful! Starting motor"));
       startMotor();
     } else if (motorStarted) {
@@ -183,25 +516,89 @@ void checkPaymentStatus() {
   http.end();
 }
 
+// Modified handleMotorOperation to handle rotation phases
 void handleMotorOperation() {
-  // Check for motor timeout
-  if (motorStarted && millis() - motorStartTime > MOTOR_TIMEOUT) {
-    Serial.println(F("Motor timeout reached! Stopping motor."));
-    stopMotor();
+  unsigned long currentTime = millis();
+  
+  // Check if debug output should be printed
+  if (currentTime - lastDebugPrint > 1000) {  // Every second
+    if (motorStarted) {
+      Serial.print(F("DEBUG - Motor Status: Running | Phase: "));
+      Serial.print(inBackwardRotationPhase ? F("Backward") : F("Forward"));
+      Serial.print(F(" | IR Sensor: "));
+      Serial.print(digitalRead(IR_SENSOR_PIN));
+      Serial.print(F(" | Motor pins: "));
+      Serial.print(digitalRead(MOTOR_PIN1));
+      Serial.print(F(","));
+      Serial.print(digitalRead(MOTOR_PIN2));
+      Serial.print(F(" | Enable: "));
+      Serial.println(analogRead(MOTOR_ENABLE_PIN));
+    } else {
+      Serial.print(F("DEBUG - Motor Status: Stopped | IR Sensor: "));
+      Serial.println(digitalRead(IR_SENSOR_PIN));
+    }
+    lastDebugPrint = currentTime;
   }
   
-  // Check for IR sensor trigger
-  if (motorStarted && irInterruptDetected) {
-    Serial.println(F("IR sensor triggered! Stopping motor."));
-    irInterruptDetected = false;
-    stopMotor();
+  // Check if motor is running
+  if (motorStarted) {
+    // Phase switch from backward to forward rotation
+    if (inBackwardRotationPhase && (currentTime - backwardRotationStartTime >= BACKWARD_ROTATION_TIME)) {
+      Serial.println(F("Switching to forward rotation phase"));
+      inBackwardRotationPhase = false;
+      digitalWrite(MOTOR_PIN1, LOW);
+      digitalWrite(MOTOR_PIN2, HIGH);
+      analogWrite(MOTOR_ENABLE_PIN, 1023);  // Full power
+      
+      // Reset motor start time for timeout calculations
+      motorStartTime = currentTime;
+      
+      // Debug output
+      Serial.print(F("MOTOR SWITCH: PIN values: "));
+      Serial.print(F("MOTOR_PIN1="));
+      Serial.print(digitalRead(MOTOR_PIN1));
+      Serial.print(F(", MOTOR_PIN2="));
+      Serial.print(digitalRead(MOTOR_PIN2));
+      Serial.print(F(", MOTOR_ENABLE_PIN="));
+      Serial.println(analogRead(MOTOR_ENABLE_PIN));
+    }
+    
+    // Check if IR sensor was triggered (flag might be set by ISR)
+    if (irInterruptDetected) {
+      Serial.println(F("IR sensor triggered! Confirming motor is stopped."));
+      stopMotor();  // This now sets dispensing to 0
+      irInterruptDetected = false;
+      // Update payment status after motor stops due to IR sensor
+      updatePaymentStatus();
+    }
+    // Check for overall motor timeout
+    else if (currentTime - motorStartTime >= MOTOR_TIMEOUT) {
+      Serial.println(F("Motor timeout reached! Stopping motor."));
+      stopMotor();  // This now sets dispensing to 0
+      // Update payment status after motor stops due to timeout
+      updatePaymentStatus();
+    }
+    // Check for IR sensor timeout (10 seconds without IR response)
+    else if (!inBackwardRotationPhase && currentTime - motorStartTime >= IR_TIMEOUT && !irInterruptDetected) {
+      Serial.println(F("IR sensor timeout reached. Initiating refund."));
+      // Fetch current payment ID BEFORE stopping motor
+      String currentPaymentId = getCurrentPaymentId();
+      if (currentPaymentId != "") {
+        stopMotorForRefund();  // This now also sets dispensing to 0
+        startRefundProcess(currentPaymentId, "IR sensor timeout reached before proper product detection.");
+      } else {
+        Serial.println(F("No valid payment ID available for refund."));
+        stopMotor();  // This now sets dispensing to 0
+      }
+      hallTriggerCount = 0;
+    }
   }
 }
 
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.println(F("\n\nStarting simplified device..."));
+  Serial.println(F("\n\nStarting device with optimized IR response and motor control..."));
   
   // Initialize pins
   pinMode(MOTOR_PIN1, OUTPUT);
@@ -220,21 +617,32 @@ void setup() {
   
   // Attach interrupt for IR sensor
   attachInterrupt(digitalPinToInterrupt(IR_SENSOR_PIN), irSensorISR, FALLING);
+  
+  // Debug output
+  Serial.println(F("Pin setup complete. IR sensor uses interrupt on FALLING edge."));
+  Serial.print(F("Initial IR sensor state: "));
+  Serial.println(digitalRead(IR_SENSOR_PIN));
+  
+  // Initialize dispensing status to 0 at startup
+  setDispensingStatus(false);
 }
 
 void loop() {
-  // Ensure WiFi connection
-  ensureWiFiConnection();
-  
-  // Handle motor operation
+  // Handle motor operation FIRST for fastest response
   handleMotorOperation();
   
-  // Check for payment status at intervals
-  if (millis() - lastHttpRequestTime > HTTP_REQUEST_INTERVAL) {
-    if (WiFi.status() == WL_CONNECTED) {
-      checkPaymentStatus();
+  // Only do WiFi operations if no IR event is pending
+  if (!irInterruptDetected) {
+    // Ensure WiFi connection
+    ensureWiFiConnection();
+    
+    // Check for payment status at intervals
+    if (millis() - lastHttpRequestTime > HTTP_REQUEST_INTERVAL) {
+      if (WiFi.status() == WL_CONNECTED) {
+        checkPaymentStatus();
+      }
+      lastHttpRequestTime = millis();
     }
-    lastHttpRequestTime = millis();
   }
   
   yield();  // Allow the ESP8266 to handle WiFi and system tasks
