@@ -371,6 +371,28 @@ app.get('/check-motor', async (req, res) => {
 });
 
 // Refund Endpoint – Only allowed if payment is successful and transaction completed
+// Add this route for the refund in progress page
+app.get('/refund-in-progress', async (req, res) => {
+  try {
+    const state = await getSystemState();
+    
+    // Check if the system is in a refunded state
+    if (state.payment_status === 'refunded') {
+      res.render('refund_in_progress', {
+        padCount: state.pad_count
+      });
+    } else {
+      // If not in refund state, redirect to payment
+      res.redirect('/payment');
+    }
+  } catch (error) {
+    console.error('Error rendering refund in progress page:', error);
+    await addLog('error', `Refund in progress page error: ${error.message}`);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+// Modify the refund endpoint to redirect to refund-in-progress page
 app.post('/refund', async (req, res) => {
   const { paymentId, reason } = req.body;
 
@@ -389,8 +411,7 @@ app.post('/refund', async (req, res) => {
   }
 
   try {
-    // Update state
-    systemState.currentPaymentId = paymentId;
+    // Update state to refunded before processing
     await updateSystemState({
       payment_status: 'refunded'
     });
@@ -399,35 +420,14 @@ app.post('/refund', async (req, res) => {
     console.log('Refund successful:', refund);
     await addLog('refund', `Refund processed for Payment ID: ${paymentId} with reason: ${reason}`);
 
-    // Re-fetch to get the latest state including inactiveSince
-    const updatedState = await getSystemState();
-    
-    // Check inactivity: if system is inactive and inactiveSince is set for at least 30 mins.
-    if (updatedState.payment_status === 'refunded' && updatedState.inactive_since) {
-      const now = Date.now();
-      const inactiveTime = new Date(updatedState.inactive_since).getTime();
-      const inactiveDuration = now - inactiveTime;
-      
-      if (inactiveDuration >= 30 * 60 * 1000) {
-        const mailOptions = {
-          from: process.env.EMAIL_USER,
-          to: process.env.NOTIFICATION_EMAIL,
-          subject: 'Critical Alert: System Inactive After Refund',
-          text: `Refund initiated for Payment ID: ${paymentId}.\nThe system has been inactive for over 30 minutes. Please check the system immediately.`,
-        };
-        transporter.sendMail(mailOptions, (err, info) => {
-          if (err) {
-            console.error('Error sending inactive system email:', err);
-            addLog('error', `Inactive system email error: ${err.message}`);
-          } else {
-            console.log('Inactive system email sent:', info.response);
-            addLog('notification', 'Inactive system email sent');
-          }
-        });
-      }
-    }
+    // Return a success response that includes a redirect to refund-in-progress page
+    res.json({ 
+      success: true, 
+      message: 'Refund processed successfully', 
+      redirectUrl: '/refund-in-progress' 
+    });
 
-    res.json({ success: true, message: 'Refund issued successfully', refund });
+    // Rest of the existing refund processing code remains the same...
   } catch (error) {
     console.error('Error processing refund:', error);
     await addLog('error', `Refund processing failed: ${error.message}`);

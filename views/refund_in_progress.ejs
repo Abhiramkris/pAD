@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Refund In Progress</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #f0f0f0;
+      text-align: center;
+    }
+
+    .refund-container {
+      background-color: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      max-width: 400px;
+    }
+
+    .refund-icon {
+      font-size: 64px;
+      color: #FFA500;
+      margin-bottom: 20px;
+    }
+
+    .refund-message {
+      margin-bottom: 20px;
+    }
+
+    .pad-count {
+      color: #666;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="refund-container">
+    <div class="refund-icon">💸</div>
+    <h1>Refund In Progress</h1>
+    <div class="refund-message">
+      <p>Your refund is being processed. This may take a few moments.</p>
+      <p>We apologize for any inconvenience.</p>
+    </div>
+    <div class="pad-count"> Available Pads: <%= padCount %> </div>
+  </div>
+  <script>
+    setTimeout(() => { window.location.href = '/payment'; }, 5000); 
+  </script>
+</body>
+
+</html>
