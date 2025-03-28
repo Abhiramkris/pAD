@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2/promise');
+const cron = require('node-cron');
 const session = require('express-session');
 require('dotenv').config();
 
@@ -20,6 +21,12 @@ app.use(session({
 }));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+
+const MONITORING_CONFIG = {
+  MIN_PAD_COUNT: 5,  // Minimum pad count threshold
+  NOTIFICATION_INTERVAL: '0 */30 * * * *', // Every 30 minutes
+  MAX_OFFLINE_DURATION: 30 * 60 * 1000, // 30 minutes in milliseconds
+};
 
 // MySQL Connection Pool
 const pool = mysql.createPool({
@@ -522,6 +529,7 @@ app.post('/update-payment-status', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 // Add this route to handle Wi-Fi status reports from the ESP8266
 app.post('/inactiveduetowifi', async (req, res) => {
   const { status, authCode } = req.body;
@@ -598,6 +606,155 @@ app.get('/check', async (req, res) => {
     dispensing: state.dispensing,
   });
 });
+
+async function addLog(type, message) {
+  try {
+    await pool.execute(
+      'INSERT INTO logs (type, message, created_at) VALUES (?, ?, NOW())',
+      [type, message]
+    );
+  } catch (err) {
+    console.error('Error logging event:', err);
+  }
+}
+
+// Function to send email
+async function sendEmail(subject, message) {
+  return new Promise((resolve, reject) => {
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: process.env.NOTIFICATION_EMAIL,
+      subject: subject,
+      text: message,
+    };
+
+    transporter.sendMail(mailOptions, async (err, info) => {
+      if (err) {
+        console.error('Error sending email:', err);
+        await addLog('error', `Email send error: ${err.message}`);
+        reject(err);
+      } else {
+        console.log('Email sent:', info.response);
+        await addLog('notification', `Email sent: ${subject}`);
+        resolve(info);
+      }
+    });
+  });
+}
+
+// Comprehensive system status check
+async function checkSystemStatusAndNotify() {
+  try {
+    // Fetch system state directly from database
+    const [stateRows] = await pool.execute(
+      'SELECT * FROM system_state WHERE id = 1'
+    );
+
+    if (stateRows.length === 0) {
+      throw new Error('No system state found');
+    }
+
+    const systemState = stateRows[0];
+    const now = new Date();
+
+    // Prepare email notifications
+    const emailNotifications = [];
+
+    // 1. Check Offline Status
+    if (systemState.payment_status === 'inactive' && systemState.inactive_since) {
+      const inactiveSince = new Date(systemState.inactive_since);
+      const offlineDuration = now - inactiveSince;
+
+      if (offlineDuration >= MONITORING_CONFIG.MAX_OFFLINE_DURATION) {
+        emailNotifications.push({
+          subject: 'System Offline Alert',
+          message: `System has been offline since ${inactiveSince.toISOString()}.
+Current Status: ${systemState.payment_status}
+Inactive Duration: ${Math.floor(offlineDuration / 60000)} minutes`
+        });
+      }
+    }
+
+    // 2. Check Pad Count
+    const padCount = systemState.pad_count;
+    if (padCount <= 0) {
+      emailNotifications.push({
+        subject: 'CRITICAL: No Pads Left',
+        message: 'The system has run out of pads. Please refill immediately.'
+      });
+    } else if (padCount <= MONITORING_CONFIG.MIN_PAD_COUNT) {
+      emailNotifications.push({
+        subject: 'Low Pad Count Alert',
+        message: `Pad count is low. 
+Current Pad Count: ${padCount}
+Minimum Threshold: ${MONITORING_CONFIG.MIN_PAD_COUNT}
+Please refill soon.`
+      });
+    }
+
+    // 3. Check Recent Payment Failures (last 24 hours)
+    const [failedPayments] = await pool.execute(`
+      SELECT COUNT(*) as failedCount 
+      FROM payments 
+      WHERE status = 'failed' 
+      AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+    `);
+
+    if (failedPayments[0].failedCount > 3) {
+      emailNotifications.push({
+        subject: 'Multiple Payment Failures Detected',
+        message: `${failedPayments[0].failedCount} payment failures detected in the last 24 hours.
+Please investigate potential system or payment gateway issues.`
+      });
+    }
+
+    // Send emails for all notifications
+    for (const notification of emailNotifications) {
+      try {
+        await sendEmail(notification.subject, notification.message);
+      } catch (emailError) {
+        console.error('Failed to send email:', emailError);
+      }
+    }
+
+    // Log the monitoring check
+    await addLog('monitoring', `System status check completed. Pad Count: ${padCount}, Status: ${systemState.payment_status}`);
+
+  } catch (error) {
+    console.error('System monitoring error:', error);
+    
+    // Send error notification email
+    try {
+      await sendEmail(
+        'System Monitoring Error', 
+        `An error occurred during system monitoring:
+${error.message}
+
+Please investigate the monitoring system and database connection.`
+      );
+    } catch (emailError) {
+      console.error('Failed to send error notification email:', emailError);
+    }
+  }
+}
+
+// Set up periodic system monitoring
+function setupSystemMonitoring() {
+  // Check system status every 30 minutes
+  cron.schedule(MONITORING_CONFIG.NOTIFICATION_INTERVAL, () => {
+    checkSystemStatusAndNotify();
+  });
+
+  console.log('System monitoring initialized');
+}
+
+// Initialize monitoring when the script starts
+setupSystemMonitoring();
+
+module.exports = {
+  checkSystemStatusAndNotify,
+  setupSystemMonitoring
+};
 
 app.get('/display', async (req, res) => {
   const authCodeParam = req.query.authCode;

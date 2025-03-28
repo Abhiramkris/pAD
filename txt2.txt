@@ -7,7 +7,7 @@
 #include "SPIFFS.h"  // Include SPIFFS for persistent storage
 
 // WiFi Credentials
-const char* ssid = "asdf";
+const char* ssid = "asdff";
 const char* password = "";
 
 // Server URLs
