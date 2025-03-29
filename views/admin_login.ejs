@@ -1,25 +1,213 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Secure Hygiene Pad Dispenser Admin Portal">
+  <meta name="theme-color" content="#0A0F2D">
   <title>Admin Login</title>
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    :root {
+      --razorpay-blue: #0B5FFF;
+      --razorpay-dark: #0A0F2D;
+      --razorpay-light: #F8F9FF;
+      --bg-gradient: linear-gradient(135deg, #0A0F2D 0%, #1A1F3D 100%);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg-gradient);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      color: var(--razorpay-light);
+      padding: 1rem;
+    }
+
+    .container {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 440px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(11, 95, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .logo {
+      width: 160px;
+      max-width: 70%;
+      margin-bottom: 1.2rem;
+      filter: brightness(0) invert(1);
+    }
+
+    h1 {
+      color: var(--razorpay-light);
+      font-size: 1.5rem;
+      margin-bottom: 1.5rem;
+      text-align: center;
+    }
+
+    .form-group {
+      margin-bottom: 1.2rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+      color: #A0A7C7;
+    }
+
+    input {
+      width: 100%;
+      padding: 0.8rem 1rem;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--razorpay-light);
+      font-size: 1rem;
+      transition: border-color 0.3s ease;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--razorpay-blue);
+      box-shadow: 0 0 0 2px rgba(11, 95, 255, 0.2);
+    }
+
+    .error-message {
+      color: #ff4444;
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .submit-button {
+      background: var(--razorpay-blue);
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      padding: 1rem;
+      color: white;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin: 1.5rem 0 0.5rem;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .submit-button:hover {
+      background: #094ECC;
+      transform: translateY(-2px);
+    }
+
+    .submit-button:active {
+      transform: translateY(0);
+    }
+
+    .security-info {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 1.2rem;
+      margin-top: 1.2rem;
+    }
+
+    .security-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0.8rem 0;
+      color: #A0A7C7;
+      font-size: 0.9rem;
+    }
+
+    /* Mobile-specific adjustments */
+    @media (max-width: 480px) {
+      .container {
+        padding: 1.2rem;
+      }
+      
+      h1 {
+        font-size: 1.3rem;
+      }
+      
+      input {
+        padding: 0.7rem 0.9rem;
+      }
+      
+      .submit-button {
+        padding: 0.9rem;
+      }
+      
+      .security-item {
+        font-size: 0.8rem;
+      }
+    }
+  </style>
 </head>
+
 <body>
-  <h1>Admin Login</h1>
-  <% if (typeof error !== 'undefined') { %>
-    <p style="color:red;"><%= error %></p>
-  <% } %>
-  <form action="/admin/login" method="POST">
-    <div>
-      <label for="username">Username:</label>
-      <input type="text" name="username" id="username" required>
+  <div class="container">
+    <div class="header">
+      <i class="fas fa-shield-alt fa-3x" style="color: var(--razorpay-blue); margin-bottom: 1rem;"></i>
+      <h1>Admin Login</h1>
     </div>
-    <div>
-      <label for="password">Password:</label>
-      <input type="password" name="password" id="password" required>
+    
+    <% if (typeof error !== 'undefined') { %>
+      <div class="error-message">
+        <i class="fas fa-exclamation-circle"></i>
+        <span><%= error %></span>
+      </div>
+    <% } %>
+
+    <form action="/admin/login" method="POST">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" name="username" id="username" required autocomplete="username">
+      </div>
+      
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" name="password" id="password" required autocomplete="current-password">
+      </div>
+      
+      <button type="submit" class="submit-button">
+        <i class="fas fa-lock"></i> Secure Login
+      </button>
+    </form>
+
+    <div class="security-info">
+      <div class="security-item">
+        <i class="fas fa-shield-alt"></i>
+        <span>Secure Administrative Access</span>
+      </div>
+      <div class="security-item">
+        <i class="fas fa-user-shield"></i>
+        <span>256-bit SSL Encryption</span>
+      </div>
     </div>
-    <button type="submit">Login</button>
-  </form>
+  </div>
 </body>
 </html>

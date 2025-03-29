@@ -31,7 +31,474 @@
 
   <h2>Recent Payments</h2>
   <table border="1">
-    <thead>
+    <thead><!DOCTYPE html>
+      <html lang="en">
+      
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="Secure Hygiene Pad Dispenser Admin Dashboard">
+        <meta name="theme-color" content="#0A0F2D">
+        <title>Admin Dashboard</title>
+        <!-- Bootstrap CSS -->
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+        <!-- Font Awesome -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+        <style>
+          :root {
+            --razorpay-blue: #0B5FFF;
+            --razorpay-dark: #0A0F2D;
+            --razorpay-light: #F8F9FF;
+            --bg-gradient: linear-gradient(135deg, #0A0F2D 0%, #1A1F3D 100%);
+            --success-green: #00FF88;
+            --warning-yellow: #FFC107;
+            --danger-red: #FF4444;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --border-color: rgba(255, 255, 255, 0.1);
+          }
+      
+          body {
+            background: var(--bg-gradient);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            color: var(--razorpay-light);
+            min-height: 100vh;
+          }
+      
+          .dashboard-container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            min-height: 100vh;
+          }
+      
+          .header {
+            background: rgba(10, 15, 45, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+          }
+      
+          .header h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+          }
+      
+          .header-user {
+            font-size: 0.9rem;
+            color: #A0A7C7;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+          }
+      
+          .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            padding: 1.2rem;
+            margin-bottom: 1.5rem;
+            backdrop-filter: blur(10px);
+          }
+      
+          .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.8rem;
+          }
+      
+          .section-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+          }
+      
+          .status-card {
+            background: rgba(11, 95, 255, 0.1);
+            border-radius: 8px;
+            padding: 1rem;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+          }
+      
+          .status-label {
+            font-size: 0.9rem;
+            color: #A0A7C7;
+            margin-bottom: 0.5rem;
+          }
+      
+          .status-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+          }
+      
+          .status-value.with-icon {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+          }
+      
+          .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+          }
+      
+          .badge-active {
+            background: rgba(0, 255, 136, 0.2) !important;
+            color: var(--success-green) !important;
+          }
+          
+          .badge-inactive {
+            background: rgba(255, 68, 68, 0.2) !important;
+            color: var(--danger-red) !important;
+          }
+          
+          .badge-warning {
+            background: rgba(255, 193, 7, 0.2) !important;
+            color: var(--warning-yellow) !important;
+          }
+      
+          .action-btn {
+            background: rgba(11, 95, 255, 0.2);
+            border: 1px solid rgba(11, 95, 255, 0.3);
+            color: var(--razorpay-light);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            justify-content: center;
+          }
+      
+          .action-btn:hover {
+            background: rgba(11, 95, 255, 0.3);
+            transform: translateY(-2px);
+            color: var(--razorpay-light);
+          }
+      
+          .btn-reset {
+            background: rgba(255, 193, 7, 0.2);
+            border-color: rgba(255, 193, 7, 0.3);
+          }
+          
+          .btn-reset:hover {
+            background: rgba(255, 193, 7, 0.3);
+          }
+      
+          .btn-off {
+            background: rgba(255, 68, 68, 0.2);
+            border-color: rgba(255, 68, 68, 0.3);
+          }
+          
+          .btn-off:hover {
+            background: rgba(255, 68, 68, 0.3);
+          }
+      
+          .btn-on {
+            background: rgba(0, 255, 136, 0.2);
+            border-color: rgba(0, 255, 136, 0.3);
+          }
+          
+          .btn-on:hover {
+            background: rgba(0, 255, 136, 0.3);
+          }
+      
+          .form-control, .form-select {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            color: var(--razorpay-light);
+          }
+      
+          .form-control:focus, .form-select:focus {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--razorpay-light);
+            border-color: var(--razorpay-blue);
+            box-shadow: none;
+          }
+      
+          .table {
+            color: var(--razorpay-light);
+          }
+      
+          .table th {
+            background: rgba(11, 95, 255, 0.1);
+            color: #A0A7C7;
+            border-color: var(--border-color);
+          }
+      
+          .table td {
+            border-color: var(--border-color);
+          }
+      
+          .table tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+          }
+      
+          .log-info {
+            color: var(--razorpay-blue);
+          }
+          
+          .log-warning {
+            color: var(--warning-yellow);
+          }
+          
+          .log-error {
+            color: var(--danger-red);
+          }
+          
+          .log-success {
+            color: var(--success-green);
+          }
+      
+          .payment-success {
+            color: var(--success-green);
+          }
+          
+          .payment-pending {
+            color: var(--warning-yellow);
+          }
+          
+          .payment-failed {
+            color: var(--danger-red);
+          }
+      
+          .table-responsive {
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+          }
+        </style>
+      </head>
+      
+      <body>
+        <div class="dashboard-container">
+          <header class="header">
+            <div class="container-fluid">
+              <h1>Admin Dashboard</h1>
+              <div class="header-user">
+                <i class="fas fa-user-shield"></i>
+                <span>Welcome, <%= admin.username %></span>
+              </div>
+            </div>
+          </header>
+      
+          <main class="container py-4">
+            <!-- System State Section -->
+            <section class="section">
+              <div class="section-header">
+                <h2 class="section-title">
+                  <i class="fas fa-chart-line"></i>
+                  System State
+                </h2>
+              </div>
+              
+              <div class="row g-3">
+                <div class="col-6 col-md-3">
+                  <div class="status-card">
+                    <div class="status-label">Pad Count</div>
+                    <div class="status-value with-icon">
+                      <i class="fas fa-box"></i>
+                      <%= systemState.padCount %>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="col-6 col-md-3">
+                  <div class="status-card">
+                    <div class="status-label">Payment Status</div>
+                    <div class="status-value with-icon">
+                      <% if(systemState.paymentStatus === 'active') { %>
+                        <span class="badge badge-active px-2 py-1 rounded-pill">
+                          <i class="fas fa-check-circle"></i> Active
+                        </span>
+                      <% } else { %>
+                        <span class="badge badge-inactive px-2 py-1 rounded-pill">
+                          <i class="fas fa-times-circle"></i> Inactive
+                        </span>
+                      <% } %>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="col-6 col-md-3">
+                  <div class="status-card">
+                    <div class="status-label">Dispensing</div>
+                    <div class="status-value with-icon">
+                      <% if(systemState.dispensing) { %>
+                        <span class="badge badge-warning px-2 py-1 rounded-pill">
+                          <i class="fas fa-spinner fa-spin"></i> In Progress
+                        </span>
+                      <% } else { %>
+                        <span class="badge badge-inactive px-2 py-1 rounded-pill">
+                          <i class="fas fa-pause-circle"></i> Idle
+                        </span>
+                      <% } %>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="col-6 col-md-3">
+                  <div class="status-card">
+                    <div class="status-label">Transaction</div>
+                    <div class="status-value with-icon">
+                      <% if(systemState.transactionCompleted) { %>
+                        <span class="badge badge-active px-2 py-1 rounded-pill">
+                          <i class="fas fa-check-circle"></i> Completed
+                        </span>
+                      <% } else { %>
+                        <span class="badge badge-inactive px-2 py-1 rounded-pill">
+                          <i class="fas fa-clock"></i> Pending
+                        </span>
+                      <% } %>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+      
+            <!-- Actions Section -->
+            <section class="section">
+              <div class="section-header">
+                <h2 class="section-title">
+                  <i class="fas fa-sliders-h"></i>
+                  Actions
+                </h2>
+              </div>
+              
+              <form action="/admin/state" method="POST">
+                <div class="row g-3 mb-4">
+                  <div class="col-12 col-md-4">
+                    <button name="action" value="reset" type="submit" class="btn action-btn btn-reset w-100 py-2">
+                      <i class="fas fa-redo"></i> Reset System
+                    </button>
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <button name="action" value="switch_on" type="submit" class="btn action-btn btn-on w-100 py-2">
+                      <i class="fas fa-power-off"></i> Switch On
+                    </button>
+                  </div>
+                  <div class="col-12 col-md-4">
+                    <button name="action" value="switch_off" type="submit" class="btn action-btn btn-off w-100 py-2">
+                      <i class="fas fa-power-off"></i> Switch Off
+                    </button>
+                  </div>
+                </div>
+              </form>
+              
+              <form action="/update-pad-count" method="POST">
+                <div class="row g-3 align-items-end">
+                  <div class="col-12 col-md-6 col-lg-3">
+                    <label for="count" class="form-label text-light-50">Update Pad Count:</label>
+                    <input type="number" name="count" id="count" value="<%= systemState.padCount %>" min="0" class="form-control">
+                  </div>
+                  <div class="col-12 col-md-4 col-lg-2">
+                    <button type="submit" class="btn action-btn w-100 py-2">
+                      <i class="fas fa-sync"></i> Update
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </section>
+      
+            <!-- Recent Payments Section -->
+            <section class="section">
+              <div class="section-header">
+                <h2 class="section-title">
+                  <i class="fas fa-credit-card"></i>
+                  Recent Payments
+                </h2>
+              </div>
+              
+              <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                  <thead>
+                    <tr>
+                      <th>Order ID</th>
+                      <th>Payment ID</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                      <th>Created At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% payments.forEach(payment => { %>
+                      <tr>
+                        <td><%= payment.order_id %></td>
+                        <td><%= payment.payment_id || 'N/A' %></td>
+                        <td>₹<%= payment.amount %></td>
+                        <td>
+                          <% if(payment.status === 'success') { %>
+                            <span class="payment-success"><i class="fas fa-check-circle"></i> Success</span>
+                          <% } else if(payment.status === 'pending') { %>
+                            <span class="payment-pending"><i class="fas fa-clock"></i> Pending</span>
+                          <% } else { %>
+                            <span class="payment-failed"><i class="fas fa-times-circle"></i> Failed</span>
+                          <% } %>
+                        </td>
+                        <td><%= payment.created_at %></td>
+                      </tr>
+                    <% }); %>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+      
+            <!-- Recent Logs Section -->
+            <section class="section">
+              <div class="section-header">
+                <h2 class="section-title">
+                  <i class="fas fa-history"></i>
+                  Recent Logs
+                </h2>
+              </div>
+              
+              <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Message</th>
+                      <th>Created At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% logs.forEach(log => { %>
+                      <tr>
+                        <td>
+                          <% if(log.type === 'info') { %>
+                            <span class="log-info"><i class="fas fa-info-circle"></i> Info</span>
+                          <% } else if(log.type === 'warning') { %>
+                            <span class="log-warning"><i class="fas fa-exclamation-triangle"></i> Warning</span>
+                          <% } else if(log.type === 'error') { %>
+                            <span class="log-error"><i class="fas fa-exclamation-circle"></i> Error</span>
+                          <% } else if(log.type === 'success') { %>
+                            <span class="log-success"><i class="fas fa-check-circle"></i> Success</span>
+                          <% } else { %>
+                            <%= log.type %>
+                          <% } %>
+                        </td>
+                        <td><%= log.message %></td>
+                        <td><%= log.created_at %></td>
+                      </tr>
+                    <% }); %>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </main>
+        </div>
+      
+        <!-- Bootstrap JS Bundle with Popper -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+      </body>
+      </html>
       <tr>
         <th>Order ID</th>
         <th>Payment ID</th>
