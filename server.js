@@ -325,16 +325,203 @@ app.post('/create-order', async (req, res) => {
   }
 });
 
-// Verify Payment
+// System Check Admin Route - For receiving system metrics from ESP32
+app.post('/systemcheckadmin', async (req, res) => {
+  // Check authorization from query parameters or request body
+  const authCode = req.query.authCode || req.body.authCode;
+  
+  if (authCode !== process.env.AUTH_CODE) {
+    await addLog('error', 'Unauthorized system metrics reporting attempt');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    // Extract system metrics from request body
+    const {
+      freeHeap,
+      totalHeap,
+      heapPercentage,
+      cpuTemperature,
+      uptime,
+      cpuFrequencyMHz,
+      wifiRSSI,
+      wifiIP,
+      macAddress
+    } = req.body;
+
+    // Log the received metrics
+    const metricsLog = `System metrics - Free Heap: ${freeHeap || 'N/A'} bytes, ` +
+                       `Heap Usage: ${(heapPercentage || 0).toFixed(2)}%, ` +
+                       `CPU Temp: ${(cpuTemperature || 0).toFixed(2)}°C, ` +
+                       `Uptime: ${Math.floor((uptime || 0) / 3600)}h ${Math.floor(((uptime || 0) % 3600) / 60)}m, ` +
+                       `WiFi RSSI: ${wifiRSSI || 'N/A'}dBm, ` +
+                       `IP: ${wifiIP || 'N/A'}`;
+    
+    await addLog('system', metricsLog);
+
+    // Check for critical conditions that might need attention
+    let criticalConditions = [];
+    
+    if (heapPercentage && heapPercentage < 20) {
+      criticalConditions.push(`Low memory: ${heapPercentage.toFixed(2)}% free`);
+    }
+    
+    if (cpuTemperature && cpuTemperature > 70) {
+      criticalConditions.push(`High CPU temperature: ${cpuTemperature.toFixed(2)}°C`);
+    }
+    
+    if (wifiRSSI && wifiRSSI < -80) {
+      criticalConditions.push(`Poor WiFi signal: ${wifiRSSI}dBm`);
+    }
+
+    // If there are critical conditions, send notification email
+    if (criticalConditions.length > 0) {
+      const subject = 'System Health Alert: Critical Conditions Detected';
+      const message = `The following critical conditions were detected on the pad dispenser:\n\n` +
+                      `${criticalConditions.join('\n')}\n\n` +
+                      `Full system metrics:\n` +
+                      `- Free Heap: ${freeHeap || 'N/A'} bytes / ${totalHeap || 'N/A'} bytes (${(heapPercentage || 0).toFixed(2)}%)\n` +
+                      `- CPU Temperature: ${(cpuTemperature || 0).toFixed(2)}°C\n` +
+                      `- CPU Frequency: ${cpuFrequencyMHz || 'N/A'} MHz\n` +
+                      `- Uptime: ${Math.floor((uptime || 0) / 3600)}h ${Math.floor(((uptime || 0) % 3600) / 60)}m\n` +
+                      `- WiFi Signal Strength: ${wifiRSSI || 'N/A'}dBm\n` +
+                      `- IP Address: ${wifiIP || 'N/A'}\n` +
+                      `- MAC Address: ${macAddress || 'N/A'}\n`;
+      
+      try {
+        await sendEmail(subject, message);
+      } catch (emailError) {
+        console.error('Failed to send system metrics alert email:', emailError);
+        await addLog('error', `Metrics alert email error: ${emailError.message}`);
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'System metrics received and processed',
+      criticalIssues: criticalConditions.length > 0 ? criticalConditions : null
+    });
+  } catch (error) {
+    console.error('Error processing system metrics:', error);
+    await addLog('error', `System metrics processing error: ${error.message}`);
+    res.status(500).json({ error: 'Failed to process system metrics' });
+  }
+});
+
+// System Check Admin Route - For receiving system metrics from ESP32
+app.post('/systemcheckadmin', async (req, res) => {
+  // Check authorization from query parameters or request body
+  const authCode = req.query.authCode || req.body.authCode;
+  
+  if (authCode !== process.env.AUTH_CODE) {
+    await addLog('error', 'Unauthorized system metrics reporting attempt');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    // Extract system metrics from request body
+    const {
+      freeHeap,
+      totalHeap,
+      heapPercentage,
+      cpuTemperature,
+      uptime,
+      cpuFrequencyMHz,
+      wifiRSSI,
+      wifiIP,
+      macAddress
+    } = req.body;
+
+    // Log the received metrics
+    const metricsLog = `System metrics - Free Heap: ${freeHeap || 'N/A'} bytes, ` +
+                       `Heap Usage: ${(heapPercentage || 0).toFixed(2)}%, ` +
+                       `CPU Temp: ${(cpuTemperature || 0).toFixed(2)}°C, ` +
+                       `Uptime: ${Math.floor((uptime || 0) / 3600)}h ${Math.floor(((uptime || 0) % 3600) / 60)}m, ` +
+                       `WiFi RSSI: ${wifiRSSI || 'N/A'}dBm, ` +
+                       `IP: ${wifiIP || 'N/A'}`;
+    
+    await addLog('system', metricsLog);
+
+    // Check for critical conditions that might need attention
+    let criticalConditions = [];
+    
+    if (heapPercentage && heapPercentage < 20) {
+      criticalConditions.push(`Low memory: ${heapPercentage.toFixed(2)}% free`);
+    }
+    
+    if (cpuTemperature && cpuTemperature > 70) {
+      criticalConditions.push(`High CPU temperature: ${cpuTemperature.toFixed(2)}°C`);
+    }
+    
+    if (wifiRSSI && wifiRSSI < -80) {
+      criticalConditions.push(`Poor WiFi signal: ${wifiRSSI}dBm`);
+    }
+
+    // If there are critical conditions, send notification email
+    if (criticalConditions.length > 0) {
+      const subject = 'System Health Alert: Critical Conditions Detected';
+      const message = `The following critical conditions were detected on the pad dispenser:\n\n` +
+                      `${criticalConditions.join('\n')}\n\n` +
+                      `Full system metrics:\n` +
+                      `- Free Heap: ${freeHeap || 'N/A'} bytes / ${totalHeap || 'N/A'} bytes (${(heapPercentage || 0).toFixed(2)}%)\n` +
+                      `- CPU Temperature: ${(cpuTemperature || 0).toFixed(2)}°C\n` +
+                      `- CPU Frequency: ${cpuFrequencyMHz || 'N/A'} MHz\n` +
+                      `- Uptime: ${Math.floor((uptime || 0) / 3600)}h ${Math.floor(((uptime || 0) % 3600) / 60)}m\n` +
+                      `- WiFi Signal Strength: ${wifiRSSI || 'N/A'}dBm\n` +
+                      `- IP Address: ${wifiIP || 'N/A'}\n` +
+                      `- MAC Address: ${macAddress || 'N/A'}\n`;
+      
+      try {
+        await sendEmail(subject, message);
+      } catch (emailError) {
+        console.error('Failed to send system metrics alert email:', emailError);
+        await addLog('error', `Metrics alert email error: ${emailError.message}`);
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'System metrics received and processed',
+      criticalIssues: criticalConditions.length > 0 ? criticalConditions : null
+    });
+  } catch (error) {
+    console.error('Error processing system metrics:', error);
+    await addLog('error', `System metrics processing error: ${error.message}`);
+    res.status(500).json({ error: 'Failed to process system metrics' });
+  }
+});
+
+
+// Verify Payment with Amount Validation
 app.post('/verify-payment', async (req, res) => {
   const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+  
+  // Validate the signature
   const generated_signature = crypto
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(`${systemState.currentOrderId}|${razorpay_payment_id}`)
     .digest('hex');
 
-  if (generated_signature === razorpay_signature) {
-    // Update system state
+  if (generated_signature !== razorpay_signature) {
+    await addLog('error', 'Payment verification failed: Signature mismatch');
+    return res.status(400).json({ status: 'failed', error: 'Invalid payment signature' });
+  }
+
+  try {
+    // Fetch payment details from Razorpay to verify the amount
+    const paymentDetails = await razorpay.payments.fetch(razorpay_payment_id);
+    
+    // Check if the payment amount matches the expected amount (530 paise = ₹5.30)
+    const expectedAmount = 530;
+    if (paymentDetails.amount < expectedAmount) {
+      await addLog('error', `Payment amount verification failed: Expected ₹${expectedAmount/100} but received ₹${paymentDetails.amount/100}`);
+      return res.status(400).json({ 
+        status: 'failed', 
+        error: 'Payment amount does not match the expected amount' 
+      });
+    }
+    
+    // Payment verified and amount matches - update system state
     systemState.currentPaymentId = razorpay_payment_id;
     await updateSystemState({
       payment_status: 'success',
@@ -343,15 +530,16 @@ app.post('/verify-payment', async (req, res) => {
     });
     
     await pool.execute(
-      'UPDATE payments SET payment_id = ?, status = ? WHERE order_id = ?',
-      [razorpay_payment_id, 'success', systemState.currentOrderId]
+      'UPDATE payments SET payment_id = ?, status = ?, amount_paid = ? WHERE order_id = ?',
+      [razorpay_payment_id, 'success', paymentDetails.amount, systemState.currentOrderId]
     );
     
-    await addLog('payment', `Payment verified: ${razorpay_payment_id}`);
+    await addLog('payment', `Payment verified: ${razorpay_payment_id}, Amount: ₹${paymentDetails.amount/100}`);
     res.json({ status: 'success' });
-  } else {
-    await addLog('error', 'Payment verification failed: Signature mismatch');
-    res.status(400).json({ status: 'failed' });
+  } catch (error) {
+    console.error('Payment verification error:', error);
+    await addLog('error', `Payment verification error: ${error.message}`);
+    res.status(500).json({ status: 'failed', error: 'Payment verification process failed' });
   }
 });
 
