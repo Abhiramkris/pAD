@@ -325,8 +325,6 @@ app.post('/create-order', async (req, res) => {
   }
 });
 
-
-
 // System Check Admin Route - For receiving system metrics from ESP32
 app.post('/systemcheckadmin', async (req, res) => {
   // Check authorization from query parameters or request body
@@ -410,6 +408,97 @@ app.post('/systemcheckadmin', async (req, res) => {
   }
 });
 
+// System Check Admin Route - For receiving system metrics from ESP32
+app.post('/systemcheckadmin', async (req, res) => {
+  // Check authorization from query parameters or request body
+  const authCode = req.query.authCode || req.body.authCode;
+  
+  if (authCode !== process.env.AUTH_CODE) {
+    await addLog('error', 'Unauthorized system metrics reporting attempt');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  try {
+    // Extract system metrics from request body
+    const metrics = {
+      freeHeap: req.body.freeHeap,
+      totalHeap: req.body.totalHeap,
+      heapPercentage: req.body.heapPercentage,
+      cpuTemperature: req.body.cpuTemperature,
+      uptime: req.body.uptime,
+      cpuFrequencyMHz: req.body.cpuFrequencyMHz,
+      wifiRSSI: req.body.wifiRSSI,
+      wifiIP: req.body.wifiIP,
+      macAddress: req.body.macAddress,
+      flashSizeBytes: req.body.flashSizeBytes,
+      timestamp: new Date()
+    };
+    
+    // Store metrics for GET endpoint access
+    global.latestMetrics = metrics;
+    global.latestMetricsTimestamp = new Date();
+    
+    // Option: Store in database for persistence
+    // await db.collection('systemMetrics').insertOne(metrics);
+    
+    // Log the received metrics
+    const metricsLog = `System metrics - Free Heap: ${metrics.freeHeap || 'N/A'} bytes, ` +
+                      `Heap Usage: ${(metrics.heapPercentage || 0).toFixed(2)}%, ` +
+                      `CPU Temp: ${(metrics.cpuTemperature || 0).toFixed(2)}°C, ` +
+                      `Uptime: ${Math.floor((metrics.uptime || 0) / 3600)}h ${Math.floor(((metrics.uptime || 0) % 3600) / 60)}m, ` +
+                      `WiFi RSSI: ${metrics.wifiRSSI || 'N/A'}dBm, ` +
+                      `IP: ${metrics.wifiIP || 'N/A'}`;
+        
+    await addLog('system', metricsLog);
+    
+    // Check for critical conditions that might need attention
+    let criticalConditions = [];
+        
+    if (metrics.heapPercentage && metrics.heapPercentage < 20) {
+      criticalConditions.push(`Low memory: ${metrics.heapPercentage.toFixed(2)}% free`);
+    }
+        
+    if (metrics.cpuTemperature && metrics.cpuTemperature > 70) {
+      criticalConditions.push(`High CPU temperature: ${metrics.cpuTemperature.toFixed(2)}°C`);
+    }
+        
+    if (metrics.wifiRSSI && metrics.wifiRSSI < -80) {
+      criticalConditions.push(`Poor WiFi signal: ${metrics.wifiRSSI}dBm`);
+    }
+    
+    // If there are critical conditions, send notification email
+    if (criticalConditions.length > 0) {
+      const subject = 'System Health Alert: Critical Conditions Detected';
+      const message = `The following critical conditions were detected on the pad dispenser:\n\n` +
+                     `${criticalConditions.join('\n')}\n\n` +
+                     `Full system metrics:\n` +
+                     `- Free Heap: ${metrics.freeHeap || 'N/A'} bytes / ${metrics.totalHeap || 'N/A'} bytes (${(metrics.heapPercentage || 0).toFixed(2)}%)\n` +
+                     `- CPU Temperature: ${(metrics.cpuTemperature || 0).toFixed(2)}°C\n` +
+                     `- CPU Frequency: ${metrics.cpuFrequencyMHz || 'N/A'} MHz\n` +
+                     `- Uptime: ${Math.floor((metrics.uptime || 0) / 3600)}h ${Math.floor(((metrics.uptime || 0) % 3600) / 60)}m\n` +
+                     `- WiFi Signal Strength: ${metrics.wifiRSSI || 'N/A'}dBm\n` +
+                     `- IP Address: ${metrics.wifiIP || 'N/A'}\n` +
+                     `- MAC Address: ${metrics.macAddress || 'N/A'}\n`;
+            
+      try {
+        await sendEmail(subject, message);
+      } catch (emailError) {
+        console.error('Failed to send system metrics alert email:', emailError);
+        await addLog('error', `Metrics alert email error: ${emailError.message}`);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: 'System metrics received and processed',
+      criticalIssues: criticalConditions.length > 0 ? criticalConditions : null
+    });
+  } catch (error) {
+    console.error('Error processing system metrics:', error);
+    await addLog('error', `System metrics processing error: ${error.message}`);
+    res.status(500).json({ error: 'Failed to process system metrics' });
+  }
+});
 
 // Verify Payment with Amount Validation
 app.post('/verify-payment', async (req, res) => {
